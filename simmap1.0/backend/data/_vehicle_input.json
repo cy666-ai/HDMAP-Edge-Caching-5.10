@@ -1,0 +1,43 @@
+{
+  "Prob_Route": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "algorithmParams": {
+    "E": 3,
+    "X": 150,
+    "alpha": 0.8,
+    "Capacity_Scale": 1.2,
+    "allowed_layers_per_block": [
+      3,
+      4,
+      4
+    ],
+    "layer_profit_ranges": {
+      "Raw": [
+        25,
+        35
+      ],
+      "Geo": [
+        15,
+        25
+      ],
+      "Sem": [
+        8,
+        15
+      ],
+      "Dyn": [
+        -5,
+        5
+      ]
+    }
+  },
+  "regionCounts": [
+    0,
+    0,
+    0
+  ],
+  "vehicleCount": 5,
+  "timestamp": "2026-05-10T11:31:42.737Z"
+}

@@ -1,0 +1,16 @@
+步骤 1（已生成输入文件，可直接跳过此步）：
+
+cd "simmap1.0/backend"
+node scripts/generateMatlabInput.js
+
+步骤 2 — 运行 MATLAB 生成缓存决策：
+cd "5.10"
+matlab -batch "HM_Export_CacheDecision"
+
+步骤 3 — 启动后端和前端（与之前一样）：
+cd "simmap1.0/backend" 
+npm run dev
+cd "simmap1.0/frontend" 
+npm run dev
+
+步骤 4 — 打开浏览器，点击"开始行驶"，即可在地图上看到 9 个 RSU 标记点和实时的命中率面板。
