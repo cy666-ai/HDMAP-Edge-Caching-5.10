@@ -42,14 +42,25 @@ const amapTileLayer = L.tileLayer('https://webrd01.is.autonavi.com/appmaptile?la
   minZoom: 3
 })
 
-// 创建车辆图标
-function createCarIcon(heading = 0) {
+// 6条路线的颜色（与 RSUHitRate.vue 的 routeColor 一致）
+const ROUTE_COLORS = {
+  1: { body: '#409EFF', stroke: '#2c6db5', window: '#8ac4ff' },
+  2: { body: '#E6A23C', stroke: '#b8821f', window: '#f0c78a' },
+  3: { body: '#67C23A', stroke: '#4a9e2a', window: '#95d475' },
+  4: { body: '#F56C6C', stroke: '#c04040', window: '#f8a0a0' },
+  5: { body: '#B37FEB', stroke: '#8a5ccf', window: '#d0b0f5' },
+  6: { body: '#36CFC9', stroke: '#28a09a', window: '#80e0db' },
+}
+
+// 创建车辆图标（按路线着色，每条路线5辆车同色便于识别）
+function createCarIcon(heading = 0, routeId = 1) {
   const size = 32
+  const c = ROUTE_COLORS[routeId] || ROUTE_COLORS[1]
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${size}" height="${size}">
       <g transform="rotate(${heading}, 16, 16)">
-        <rect x="8" y="12" width="16" height="10" rx="3" fill="#409EFF" stroke="#2c6db5" stroke-width="1"/>
-        <rect x="10" y="8" width="12" height="5" rx="2" fill="#66b1ff" stroke="#2c6db5" stroke-width="0.5"/>
+        <rect x="8" y="12" width="16" height="10" rx="3" fill="${c.body}" stroke="${c.stroke}" stroke-width="1"/>
+        <rect x="10" y="8" width="12" height="5" rx="2" fill="${c.window}" stroke="${c.stroke}" stroke-width="0.5"/>
         <circle cx="11" cy="23" r="2.5" fill="#333"/>
         <circle cx="21" cy="23" r="2.5" fill="#333"/>
         <rect x="14" y="16" width="4" height="3" rx="0.5" fill="#fff" opacity="0.8"/>
@@ -86,9 +97,10 @@ function initRsuMarkers() {
   const rsuList = props.rsuData?.rsus || []
   if (rsuList.length === 0) return
 
-  rsuList.forEach(rsu => {
+  rsuList.forEach((rsu, idx) => {
     const color = REGION_COLORS[rsu.region] || '#909399'
     const latlng = [rsu.latitude, rsu.longitude]
+    const tileCount = props.rsuData?.rsuChunks?.[idx]?.length || 0
 
     // RSU 位置标记
     const marker = L.circleMarker(latlng, {
@@ -117,7 +129,8 @@ function initRsuMarkers() {
         位置: ${rsu.name}<br/>
         区域: ${rsu.region}<br/>
         覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
-        <span id="rsu-hitrate-${rsu.id}" style="color:#409EFF;font-weight:bold;">命中率: 计算中...</span>
+        <span id="rsu-hitrate-${rsu.id}" style="color:#409EFF;font-weight:bold;">命中率: 计算中...</span><br/>
+        缓存瓦片: ${tileCount} 个
       </div>
     `)
 
@@ -131,10 +144,12 @@ function initRsuMarkers() {
  */
 function updateRsuMarkers(rsuData) {
   if (!rsuData || !rsuData.rsus) return
-  for (const rsu of rsuData.rsus) {
+  for (let idx = 0; idx < rsuData.rsus.length; idx++) {
+    const rsu = rsuData.rsus[idx]
     const marker = rsuMarkers[rsu.id]
     if (!marker) continue
     const hitRate = (rsu.hitRate * 100).toFixed(1)
+    const tileCount = rsuData.rsuChunks?.[idx]?.length || 0
     // 根据命中率调整透明度
     marker.setStyle({ fillOpacity: 0.3 + hitRate / 100 * 0.7 })
     // 更新 popup 内容
@@ -144,7 +159,8 @@ function updateRsuMarkers(rsuData) {
         位置: ${rsu.name}<br/>
         区域: ${rsu.region}<br/>
         覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
-        <span style="color:#409EFF;font-weight:bold;">命中率: ${hitRate}%</span>
+        <span style="color:#409EFF;font-weight:bold;">命中率: ${hitRate}%</span><br/>
+        缓存瓦片: ${tileCount} 个
       </div>
     `)
   }
@@ -186,22 +202,25 @@ function updateVehicleMarkers(vehicles) {
   // 更新/添加车辆标记
   vehicles.forEach(v => {
     const id = v.id
+    const routeId = v.routeId || 1
+    const routeName = v.routeName || ''
     const latlng = [v.latitude, v.longitude]
 
     if (vehicleMarkers[id]) {
       // 更新位置和方向
       vehicleMarkers[id].setLatLng(latlng)
-      const newIcon = createCarIcon(v.heading || 0)
+      const newIcon = createCarIcon(v.heading || 0, routeId)
       vehicleMarkers[id].setIcon(newIcon)
     } else {
-      // 创建新标记
+      // 创建新标记（按路线着色）
       const marker = L.marker(latlng, {
-        icon: createCarIcon(v.heading || 0)
+        icon: createCarIcon(v.heading || 0, routeId)
       })
         .addTo(map)
         .bindPopup(`
           <div style="font-size:13px;">
             <b>车辆 #${id}</b><br/>
+            路线: ${routeName}<br/>
             速度: ${(v.speed || 0).toFixed(1)} km/h<br/>
             位置: ${v.latitude.toFixed(6)}, ${v.longitude.toFixed(6)}
           </div>

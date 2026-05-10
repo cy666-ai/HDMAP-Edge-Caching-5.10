@@ -51,6 +51,7 @@ export function setupSocketHandlers(io) {
       console.log(`[Simulation] 收到重置指令 from ${socket.id}`)
       simulationService.reset()
       cachingService.stop()
+      cachingService.reset()
       io.emit('simulation:status', { status: 'reset' })
     })
 

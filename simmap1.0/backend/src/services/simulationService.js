@@ -236,7 +236,8 @@ export class SimulationService {
 
       for (let i = 0; i < VEHICLES_PER_ROUTE; i++) {
         vehicleId++
-        const startIdx = Math.floor(Math.random() * Math.max(1, path.length - 5))
+        // 每路线5辆车均匀分布，确保地图上清晰可见5辆车在移动
+        const startIdx = Math.floor((i / VEHICLES_PER_ROUTE) * Math.max(path.length - 1, 1))
 
         this.vehicles.push({
           id: vehicleId,
@@ -384,7 +385,9 @@ export class SimulationService {
         speed: v.speed,
         heading: v.heading,
         completed: v.completed,
-        trajectory: v.trajectory
+        trajectory: v.trajectory,
+        routeId: v.routeId,
+        routeName: v.routeName,
       })),
       timestamp: new Date().toISOString(),
       tick: this.tickCount

@@ -1,7 +1,7 @@
 <template>
   <div class="rsu-hitrate">
     <div class="panel-header">
-      <span class="panel-title">RSU 缓存命中率</span>
+      <span class="panel-title">缓存命中完成率</span>
       <el-tag size="small" :type="matlabStatusType" effect="plain">
         {{ matlabStatusText }}
       </el-tag>
@@ -23,35 +23,35 @@
 
     <div class="divider"></div>
 
-    <!-- 各区域命中率 -->
-    <div class="section-title">各区域详情</div>
+    <!-- 各路线命中率 -->
+    <div class="section-title">各路线详情</div>
     <div
-      v-for="region in regions"
-      :key="region.id"
-      class="region-item"
+      v-for="route in routes"
+      :key="route.id"
+      class="route-item"
     >
-      <div class="region-header">
-        <span class="region-name">
-          <span class="region-dot" :style="{ background: regionColor(region.id) }"></span>
-          {{ region.name }}
+      <div class="route-header">
+        <span class="route-name">
+          <span class="route-dot" :style="{ background: routeColor(route.id) }"></span>
+          {{ route.name }}
         </span>
-        <span class="region-vehicles">{{ region.vehicleCount }} 辆车</span>
+        <span class="route-vehicles">{{ route.vehicleCount }} 辆车</span>
       </div>
-      <div class="region-stats">
+      <div class="route-stats">
         <div class="stat-row">
-          <span class="stat-label">命中率</span>
-          <span class="stat-value">{{ (region.hitRate * 100).toFixed(1) }}%</span>
+          <span class="stat-label">完成率</span>
+          <span class="stat-value">{{ (route.hitRate * 100).toFixed(1) }}%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">命中块数</span>
+          <span class="stat-value">{{ route.totalChunks }} 块</span>
         </div>
         <el-progress
-          :percentage="Math.round(region.hitRate * 100)"
-          :color="hitRateColor(region.hitRate)"
+          :percentage="Math.round(route.hitRate * 100)"
+          :color="hitRateColor(route.hitRate)"
           :stroke-width="12"
           :show-text="false"
         />
-        <div class="stat-row">
-          <span class="stat-label">路线概率</span>
-          <span class="stat-value">{{ region.probRoute.toFixed(4) }}</span>
-        </div>
       </div>
     </div>
 
@@ -77,6 +77,43 @@
             ></div>
           </div>
           <span class="algo-value">{{ (algo.value * 100).toFixed(2) }}%</span>
+        </div>
+      </div>
+    </template>
+
+    <!-- 瓦片分布统计 -->
+    <template v-if="tileStats && tileStats.totalTiles > 0">
+      <div class="divider"></div>
+      <div class="section-title">瓦片分布</div>
+      <div class="tile-summary">
+        <div class="tile-stat-item">
+          <div class="tile-stat-label">系统瓦片数</div>
+          <div class="tile-stat-value">{{ tileStats.totalTiles }}</div>
+        </div>
+        <div class="tile-stat-item">
+          <div class="tile-stat-label">副本总数</div>
+          <div class="tile-stat-value">{{ tileStats.totalCopies }}</div>
+        </div>
+        <div class="tile-stat-item">
+          <div class="tile-stat-label">活跃 RSU</div>
+          <div class="tile-stat-value">{{ tileStats.activeRSUs }}</div>
+        </div>
+      </div>
+      <!-- 热门瓦片 Top 8 -->
+      <div v-if="topTiles.length > 0" class="top-tiles">
+        <div class="tile-subtitle">热门瓦片 (Top 8)</div>
+        <div class="tile-bar-list">
+          <div v-for="(item, idx) in topTiles" :key="item.id" class="tile-bar-row">
+            <span class="tile-rank">{{ idx + 1 }}</span>
+            <span class="tile-bar-label">#{{ item.id }}</span>
+            <div class="tile-bar-track">
+              <div
+                class="tile-bar-fill"
+                :style="{ width: (item.pct * 100).toFixed(1) + '%', background: tileBarColor(item.pct) }"
+              ></div>
+            </div>
+            <span class="tile-bar-count">{{ item.count }}x</span>
+          </div>
         </div>
       </div>
     </template>
@@ -116,9 +153,35 @@ const emit = defineEmits(['recalc'])
 
 const totalHitRate = computed(() => props.data?.totalHitRate || 0)
 
-const regions = computed(() => props.data?.regions || [])
+const routes = computed(() => props.data?.routes || [])
 
 const algorithmResults = computed(() => props.data?.algorithmResults || null)
+
+const tileStats = computed(() => props.data?.tileStats || null)
+
+const rsuChunks = computed(() => props.data?.rsuChunks || [])
+
+const topTiles = computed(() => {
+  const chunks = rsuChunks.value
+  if (!chunks || chunks.length === 0) return []
+
+  // 统计每个瓦片被多少个 RSU 存储
+  const freq = {}
+  for (const tiles of chunks) {
+    for (const tileId of tiles) {
+      freq[tileId] = (freq[tileId] || 0) + 1
+    }
+  }
+
+  // 按频次降序排列取前 8
+  const sorted = Object.entries(freq)
+    .map(([id, count]) => ({ id: Number(id), count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8)
+
+  const maxCount = sorted.length > 0 ? sorted[0].count : 1
+  return sorted.map(item => ({ ...item, pct: item.count / maxCount }))
+})
 
 const matlabRunning = computed(() => props.data?.matlabRunning || false)
 
@@ -157,8 +220,14 @@ function hitRateColor(rate) {
   return '#F56C6C'
 }
 
-function regionColor(id) {
-  const colors = { 1: '#F56C6C', 2: '#E6A23C', 3: '#67C23A' }
+function tileBarColor(pct) {
+  if (pct > 0.7) return '#67C23A'
+  if (pct > 0.4) return '#409EFF'
+  return '#C0C4CC'
+}
+
+function routeColor(id) {
+  const colors = { 1: '#409EFF', 2: '#E6A23C', 3: '#67C23A', 4: '#F56C6C', 5: '#B37FEB', 6: '#36CFC9' }
   return colors[id] || '#909399'
 }
 
@@ -231,21 +300,21 @@ function recalc() {
   font-weight: 500;
 }
 
-.region-item {
+.route-item {
   margin-bottom: 14px;
   padding: 10px;
   background: #f5f7fa;
   border-radius: 6px;
 }
 
-.region-header {
+.route-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
 }
 
-.region-name {
+.route-name {
   font-size: 13px;
   font-weight: 500;
   display: flex;
@@ -253,19 +322,19 @@ function recalc() {
   gap: 6px;
 }
 
-.region-dot {
+.route-dot {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
 
-.region-vehicles {
+.route-vehicles {
   font-size: 11px;
   color: #909399;
 }
 
-.region-stats {
+.route-stats {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -361,5 +430,87 @@ function recalc() {
 .last-run {
   font-size: 11px;
   color: #909399;
+}
+
+/* 瓦片分布样式 */
+.tile-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tile-stat-item {
+  background: #f5f7fa;
+  border-radius: 6px;
+  padding: 8px;
+  text-align: center;
+}
+
+.tile-stat-label {
+  font-size: 11px;
+  color: #909399;
+  margin-bottom: 2px;
+}
+
+.tile-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #409EFF;
+  font-family: 'Courier New', monospace;
+}
+
+.tile-subtitle {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 6px;
+}
+
+.tile-bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tile-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tile-rank {
+  font-size: 10px;
+  color: #909399;
+  min-width: 14px;
+  text-align: right;
+}
+
+.tile-bar-label {
+  font-size: 11px;
+  color: #606266;
+  min-width: 32px;
+  font-family: 'Courier New', monospace;
+}
+
+.tile-bar-track {
+  flex: 1;
+  height: 8px;
+  background: #e4e7ed;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tile-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.tile-bar-count {
+  font-size: 11px;
+  color: #909399;
+  min-width: 24px;
+  text-align: right;
+  font-family: 'Courier New', monospace;
 }
 </style>

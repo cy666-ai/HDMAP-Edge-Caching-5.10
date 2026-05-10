@@ -52,6 +52,36 @@
           <div class="data-value">{{ selectedVehicle.trajectory?.length || 0 }}</div>
         </div>
       </div>
+
+      <!-- 瓦片收集进度 -->
+      <div v-if="vehicleTileInfo" class="tile-progress">
+        <div class="tile-progress-header">
+          <span class="tile-progress-label">瓦片收集进度</span>
+          <span class="tile-progress-value">{{ vehicleTileInfo.collectedCount }} / 100</span>
+        </div>
+        <el-progress
+          :percentage="Math.min(100, vehicleTileInfo.collectedCount)"
+          :color="tileProgressColor(vehicleTileInfo.collectedCount)"
+          :stroke-width="14"
+        />
+        <div v-if="showTileIds && vehicleTileInfo.tileIds.length > 0" class="tile-id-list">
+          <div class="tile-ids-label">已收集瓦片 ID：</div>
+          <div class="tile-ids">
+            <span v-for="id in vehicleTileInfo.tileIds" :key="id" class="tile-id-badge">
+              {{ id }}
+            </span>
+          </div>
+        </div>
+        <el-button
+          v-if="vehicleTileInfo.tileIds.length > 0"
+          text
+          size="small"
+          type="primary"
+          @click="showTileIds = !showTileIds"
+        >
+          {{ showTileIds ? '收起瓦片列表' : '查看瓦片列表' }}
+        </el-button>
+      </div>
     </template>
 
     <template v-else>
@@ -79,6 +109,7 @@ const props = defineProps({
 
 const vehicleStore = useVehicleStore()
 const connected = ref(false)
+const showTileIds = ref(false)
 
 const selectedVehicle = computed(() => vehicleStore.selectedVehicle)
 const vehicleCount = computed(() => vehicleStore.vehicleCount)
@@ -91,6 +122,20 @@ const formattedTime = computed(() => {
   const s = Math.floor(t % 60)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 })
+
+const vehicleTileInfo = computed(() => {
+  const veh = selectedVehicle.value
+  const tiles = props.rsuData?.vehicleTiles
+  if (!veh || !tiles) return null
+  return tiles[veh.id] || null
+})
+
+function tileProgressColor(count) {
+  if (count >= 100) return '#67C23A'
+  if (count > 50) return '#409EFF'
+  if (count > 20) return '#E6A23C'
+  return '#F56C6C'
+}
 
 function onConnect() {
   connected.value = true
@@ -182,5 +227,60 @@ onBeforeUnmount(() => {
   font-size: 13px;
   text-align: center;
   padding: 20px 0;
+}
+
+.tile-progress {
+  margin-top: 12px;
+  padding: 10px;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+
+.tile-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.tile-progress-label {
+  font-size: 12px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.tile-progress-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #409EFF;
+  font-family: 'Courier New', monospace;
+}
+
+.tile-id-list {
+  margin-top: 8px;
+}
+
+.tile-ids-label {
+  font-size: 11px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+
+.tile-ids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.tile-id-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: #ecf5ff;
+  color: #409EFF;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  border: 1px solid #d9ecff;
 }
 </style>
