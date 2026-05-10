@@ -1,0 +1,52 @@
+[DB] SQLite 数据库连接成功
+[DB] 数据模型同步完成
+[Simulation] 已加载 9 条高德地图真实道路数据
+[Simulation] 已初始化 30 辆车，分配至 6 条固定路线
+[rsuDeployment] 已加载 8 条主干道/路线道路数据
+[rsuDeployment] RSU候选点: 102（地铁站: 8, 道路点: 94）
+[rsuDeployment] 部署完成: 102个RSU, 区域分布: [42, 23, 37]
+[Server] 后端服务已启动: http://localhost:3000
+[Server] WebSocket 服务已就绪
+[Socket] 客户端已连接: xKAstgot7qDf9MsmAAAB
+[Simulation] 收到开始指令 from xKAstgot7qDf9MsmAAAB
+[Simulation] 启动模拟, 速度等级: 5, 推送间隔: 600ms
+[Caching] 启动 RSU 数据广播 (每 5000ms)
+[Caching] 启动 MATLAB 周期重算 (每 60000ms)
+[Caching] 已加载 MATLAB 结果，总命中率: 0.0663
+[Simulation] 收到重置指令 from xKAstgot7qDf9MsmAAAB
+[Simulation] 已初始化 30 辆车，分配至 6 条固定路线
+[Simulation] 模拟已重置
+[Caching] 已停止
+[Simulation] 收到开始指令 from xKAstgot7qDf9MsmAAAB
+[Simulation] 启动模拟, 速度等级: 5, 推送间隔: 600ms
+[Caching] 启动 RSU 数据广播 (每 5000ms)
+[Caching] 启动 MATLAB 周期重算 (每 60000ms)
+[Caching] 已加载 MATLAB 结果，总命中率: 0.0663
+[Simulation] 收到重置指令 from xKAstgot7qDf9MsmAAAB
+[Simulation] 已初始化 30 辆车，分配至 6 条固定路线
+[Simulation] 模拟已重置
+[Caching] 已停止
+[Socket] 客户端已断开: xKAstgot7qDf9MsmAAAB
+[Socket] 客户端已连接: vEjzh8f6N-pEpQLoAAAD
+[Simulation] 收到开始指令 from vEjzh8f6N-pEpQLoAAAD
+[Simulation] 启动模拟, 速度等级: 5, 推送间隔: 600ms
+[Caching] 启动 RSU 数据广播 (每 5000ms)
+[Caching] 启动 MATLAB 周期重算 (每 60000ms)
+[Caching] 已加载 MATLAB 结果，总命中率: 0.0663
+[Socket] 客户端已断开: vEjzh8f6N-pEpQLoAAAD
+[Socket] 客户端已连接: slWZm1pO5or8F-YUAAAF
+[Simulation] 收到开始指令 from slWZm1pO5or8F-YUAAAF
+[Simulation] 启动模拟, 速度等级: 5, 推送间隔: 600ms
+[Simulation] 收到重置指令 from slWZm1pO5or8F-YUAAAF
+[Simulation] 已初始化 30 辆车，分配至 6 条固定路线
+[Simulation] 模拟已重置
+[Caching] 已停止
+[Simulation] 收到开始指令 from slWZm1pO5or8F-YUAAAF
+[Simulation] 启动模拟, 速度等级: 5, 推送间隔: 600ms
+[Caching] 启动 RSU 数据广播 (每 5000ms)
+[Caching] 启动 MATLAB 周期重算 (每 60000ms)
+[Caching] 已加载 MATLAB 结果，总命中率: 0.0663
+[Socket] 客户端已断开: slWZm1pO5or8F-YUAAAF
+[Caching] 触发 MATLAB 重算...
+[Caching] 启动 MATLAB: HM_Export_CacheDecision (目录: C:\Users\Administrator\Desktop\HdMAP-Code\HDMAP-Edge Caching 5.10\5.10)
+[Caching] 已加载 MATLAB 结果，总命中率: 0.0706

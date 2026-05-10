@@ -21,32 +21,19 @@ let map = null
 let vehicleMarkers = {}
 let trajectoryLines = {}
 let rsuMarkers = {}
+let rsuCoverageCircles = {}  // RSU覆盖半径圆圈（250m）
 
 // 默认中心坐标（南京鼓楼区）
-const defaultCenter = [32.059, 118.769]
+const defaultCenter = [32.059000, 118.769000]
 const defaultZoom = 15
-
-// RSU 位置 — 鼓楼区 6 条道路的 9 个交叉路口
-const RSU_POSITIONS = [
-  // 区域1 (北走廊, lat ~32.072)
-  { id: 1,  lat: 32.072,     lng: 118.770022, name: '中山北路 & 新模范马路', region: 1 },
-  { id: 4,  lat: 32.072,     lng: 118.781833, name: '中央路 & 新模范马路',   region: 1 },
-  { id: 7,  lat: 32.072,     lng: 118.752,    name: '虎踞路 & 新模范马路',   region: 1 },
-  // 区域2 (中走廊, lat ~32.058)
-  { id: 2,  lat: 32.058,     lng: 118.768778, name: '中山北路 & 北京西路', region: 2 },
-  { id: 5,  lat: 32.058,     lng: 118.781444, name: '中央路 & 北京西路',   region: 2 },
-  { id: 8,  lat: 32.058,     lng: 118.752,    name: '虎踞路 & 北京西路',   region: 2 },
-  // 区域3 (南走廊, lat ~32.046)
-  { id: 3,  lat: 32.046,     lng: 118.767711, name: '中山北路 & 汉中路', region: 3 },
-  { id: 6,  lat: 32.046,     lng: 118.781111, name: '中央路 & 汉中路',   region: 3 },
-  { id: 9,  lat: 32.046,     lng: 118.752,    name: '虎踞路 & 汉中路',   region: 3 },
-]
 
 const REGION_COLORS = {
   1: '#F56C6C', // 红 - 北侧走廊
   2: '#E6A23C', // 橙 - 中间走廊
   3: '#67C23A', // 绿 - 南侧走廊
 }
+
+const RSU_COVERAGE_RADIUS_M = 250  // RSU 覆盖半径（米），与后端一致
 
 // 高德地图切片图层（需要在实际使用时替换API密钥）
 const amapTileLayer = L.tileLayer('https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
@@ -85,15 +72,27 @@ function getTrajectoryStyle(vehicleId) {
 }
 
 /**
- * 初始化 RSU 标记
+ * 初始化 RSU 标记（从后端动态数据创建）
  */
 function initRsuMarkers() {
   if (!map) return
 
-  RSU_POSITIONS.forEach(rsu => {
+  // 清除旧标记和覆盖圆
+  Object.values(rsuMarkers).forEach(m => map.removeLayer(m))
+  Object.values(rsuCoverageCircles).forEach(c => map.removeLayer(c))
+  rsuMarkers = {}
+  rsuCoverageCircles = {}
+
+  const rsuList = props.rsuData?.rsus || []
+  if (rsuList.length === 0) return
+
+  rsuList.forEach(rsu => {
     const color = REGION_COLORS[rsu.region] || '#909399'
-    const marker = L.circleMarker([rsu.lat, rsu.lng], {
-      radius: 10,
+    const latlng = [rsu.latitude, rsu.longitude]
+
+    // RSU 位置标记
+    const marker = L.circleMarker(latlng, {
+      radius: 8,
       fillColor: color,
       color: '#fff',
       weight: 2,
@@ -101,16 +100,29 @@ function initRsuMarkers() {
       fillOpacity: 0.7,
     }).addTo(map)
 
+    // RSU 覆盖半径圆圈（250m，半透明显示覆盖范围）
+    const coverageCircle = L.circle(latlng, {
+      radius: RSU_COVERAGE_RADIUS_M,
+      color: color,
+      fillColor: color,
+      fillOpacity: 0.08,
+      weight: 1,
+      opacity: 0.3,
+      className: 'rsu-coverage-circle',
+    }).addTo(map)
+
     marker.bindPopup(`
       <div style="font-size:13px;">
         <b>RSU #${rsu.id}</b><br/>
         位置: ${rsu.name}<br/>
         区域: ${rsu.region}<br/>
+        覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
         <span id="rsu-hitrate-${rsu.id}" style="color:#409EFF;font-weight:bold;">命中率: 计算中...</span>
       </div>
     `)
 
     rsuMarkers[rsu.id] = marker
+    rsuCoverageCircles[rsu.id] = coverageCircle
   })
 }
 
@@ -123,7 +135,6 @@ function updateRsuMarkers(rsuData) {
     const marker = rsuMarkers[rsu.id]
     if (!marker) continue
     const hitRate = (rsu.hitRate * 100).toFixed(1)
-    const color = REGION_COLORS[rsu.region] || '#909399'
     // 根据命中率调整透明度
     marker.setStyle({ fillOpacity: 0.3 + hitRate / 100 * 0.7 })
     // 更新 popup 内容
@@ -132,6 +143,7 @@ function updateRsuMarkers(rsuData) {
         <b>RSU #${rsu.id}</b><br/>
         位置: ${rsu.name}<br/>
         区域: ${rsu.region}<br/>
+        覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
         <span style="color:#409EFF;font-weight:bold;">命中率: ${hitRate}%</span>
       </div>
     `)
@@ -148,7 +160,6 @@ function initMap() {
   })
 
   amapTileLayer.addTo(map)
-  initRsuMarkers()
 }
 
 function updateVehicleMarkers(vehicles) {
@@ -192,7 +203,7 @@ function updateVehicleMarkers(vehicles) {
           <div style="font-size:13px;">
             <b>车辆 #${id}</b><br/>
             速度: ${(v.speed || 0).toFixed(1)} km/h<br/>
-            位置: ${v.latitude.toFixed(4)}, ${v.longitude.toFixed(4)}
+            位置: ${v.latitude.toFixed(6)}, ${v.longitude.toFixed(6)}
           </div>
         `)
 
@@ -240,10 +251,15 @@ watch(() => vehicleStore.selectedVehicleId, (newId) => {
   }
 })
 
-// 监听 RSU 数据更新
+// 监听 RSU 数据更新（首次到达时创建标记，后续更新命中率）
 watch(() => props.rsuData, (data) => {
-  updateRsuMarkers(data)
-}, { deep: true })
+  if (!data || !data.rsus) return
+  if (Object.keys(rsuMarkers).length === 0) {
+    initRsuMarkers()
+  } else {
+    updateRsuMarkers(data)
+  }
+}, { deep: true, immediate: false })
 
 onMounted(() => {
   initMap()
@@ -256,6 +272,8 @@ onBeforeUnmount(() => {
   }
   vehicleMarkers = {}
   trajectoryLines = {}
+  rsuMarkers = {}
+  rsuCoverageCircles = {}
 })
 
 defineExpose({ fitBounds })

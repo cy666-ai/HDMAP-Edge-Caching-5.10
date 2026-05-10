@@ -31,13 +31,24 @@
         -5,
         5
       ]
-    }
+    },
+    "totalRSU": 35,
+    "RSU_per_region": [
+      13,
+      10,
+      12
+    ],
+    "regionLats": [
+      32.072,
+      32.058,
+      32.046
+    ]
   },
   "regionCounts": [
     0,
     0,
     0
   ],
-  "vehicleCount": 5,
-  "timestamp": "2026-05-10T11:31:42.737Z"
+  "vehicleCount": 30,
+  "timestamp": "2026-05-10T15:34:46.721Z"
 }

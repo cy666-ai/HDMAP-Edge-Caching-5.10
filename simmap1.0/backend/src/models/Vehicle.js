@@ -13,12 +13,12 @@ export function defineVehicleModel(sequelize) {
     },
     latitude: {
       type: DataTypes.FLOAT,
-      defaultValue: 32.059,
+      defaultValue: 32.059000,
       comment: '当前纬度'
     },
     longitude: {
       type: DataTypes.FLOAT,
-      defaultValue: 118.769,
+      defaultValue: 118.769000,
       comment: '当前经度'
     },
     speed: {

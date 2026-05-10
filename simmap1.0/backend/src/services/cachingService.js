@@ -14,34 +14,10 @@ import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { computeRSUDeployment } from '../utils/rsuDeployment.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.resolve(__dirname, '../../data')
-
-// ============ 常量定义（与 5.10/RSU_Positions_Nanjing.txt 一致）============
-
-// 9 个 RSU 部署位置（南京鼓楼区 6 条道路的 9 个交叉口）
-const RSU_POSITIONS = [
-  // 区域1 (北走廊)
-  { id: 1,  latitude: 32.072,  longitude: 118.770022, name: '中山北路 & 新模范马路', region: 1 },
-  { id: 4,  latitude: 32.072,  longitude: 118.781833, name: '中央路 & 新模范马路',   region: 1 },
-  { id: 7,  latitude: 32.072,  longitude: 118.752,    name: '虎踞路 & 新模范马路',   region: 1 },
-  // 区域2 (中走廊)
-  { id: 2,  latitude: 32.058,  longitude: 118.768778, name: '中山北路 & 北京西路', region: 2 },
-  { id: 5,  latitude: 32.058,  longitude: 118.781444, name: '中央路 & 北京西路',   region: 2 },
-  { id: 8,  latitude: 32.058,  longitude: 118.752,    name: '虎踞路 & 北京西路',   region: 2 },
-  // 区域3 (南走廊)
-  { id: 3,  latitude: 32.046,  longitude: 118.767711, name: '中山北路 & 汉中路', region: 3 },
-  { id: 6,  latitude: 32.046,  longitude: 118.781111, name: '中央路 & 汉中路',   region: 3 },
-  { id: 9,  latitude: 32.046,  longitude: 118.752,    name: '虎踞路 & 汉中路',   region: 3 },
-]
-
-// 3 个横向走廊区域（基于道路交叉口纬度分组）
-const REGIONS = [
-  { id: 1, name: '北侧走廊（新模范马路）', latitude: 32.072, rsuIds: [1, 4, 7] },
-  { id: 2, name: '中间走廊（北京西路）',   latitude: 32.058, rsuIds: [2, 5, 8] },
-  { id: 3, name: '南侧走廊（汉中路）',     latitude: 32.046, rsuIds: [3, 6, 9] },
-]
 
 // 算法参数（与 MATLAB 默认值一致）
 const ALGO_PARAMS = {
@@ -59,11 +35,22 @@ const ALGO_PARAMS = {
 }
 
 // 纬度容差（判断车辆是否在某个走廊内）
-const REGION_TOLERANCE = 0.001
+const REGION_TOLERANCE = 0.000001
 
 export class CachingService {
   constructor(io) {
     this.io = io
+
+    // 动态加载 RSU 部署数据
+    const deployment = computeRSUDeployment()
+    this.rsuPositions = deployment.intersections
+    this.regions = [
+      { id: 1, name: deployment.regionNames[0], latitude: deployment.regionLats[0], rsuCount: deployment.regionCounts[0] },
+      { id: 2, name: deployment.regionNames[1], latitude: deployment.regionLats[1], rsuCount: deployment.regionCounts[1] },
+      { id: 3, name: deployment.regionNames[2], latitude: deployment.regionLats[2], rsuCount: deployment.regionCounts[2] },
+    ]
+    this.totalRSU = deployment.totalRSU
+
     this.regionCounts = [0, 0, 0]
     this.probRoute = [1 / 3, 1 / 3, 1 / 3] // 初始均匀分布
     this.cacheDecision = null                // 450 元素布尔数组
@@ -103,8 +90,8 @@ export class CachingService {
     this.regionCounts = [0, 0, 0]
     for (const v of vehicles) {
       if (v.completed) continue
-      for (let r = 0; r < REGIONS.length; r++) {
-        if (Math.abs(v.latitude - REGIONS[r].latitude) < REGION_TOLERANCE) {
+      for (let r = 0; r < this.regions.length; r++) {
+        if (Math.abs(v.latitude - this.regions[r].latitude) < REGION_TOLERANCE) {
           this.regionCounts[r]++
         }
       }
@@ -137,7 +124,7 @@ export class CachingService {
     let totalHit = 0
     let totalReq = 0
 
-    for (let r = 0; r < REGIONS.length; r++) {
+    for (let r = 0; r < this.regions.length; r++) {
       const start = r * X
       const end = start + X - 1
       let baseReq = 0
@@ -244,7 +231,12 @@ export class CachingService {
   buildMatlabInput() {
     return {
       Prob_Route: this.probRoute,
-      algorithmParams: ALGO_PARAMS,
+      algorithmParams: {
+        ...ALGO_PARAMS,
+        totalRSU: this.totalRSU,
+        RSU_per_region: this.regions.map(r => r.rsuCount),
+        regionLats: this.regions.map(r => r.latitude),
+      },
       regionCounts: this.regionCounts,
       vehicleCount: this.vehicleCount,
       timestamp: new Date().toISOString(),
@@ -309,15 +301,14 @@ export class CachingService {
    */
   getCurrentData() {
     return {
-      rsus: RSU_POSITIONS.map(rsu => ({
+      rsus: this.rsuPositions.map(rsu => ({
         ...rsu,
         hitRate: this.chr.regions[rsu.region - 1] || 0,
       })),
-      regions: REGIONS.map((r, i) => ({
+      regions: this.regions.map((r, i) => ({
         id: r.id,
         name: r.name,
         latitude: r.latitude,
-        rsuIds: r.rsuIds,
         hitRate: this.chr.regions[i] || 0,
         probRoute: this.probRoute[i],
         vehicleCount: this.regionCounts[i],

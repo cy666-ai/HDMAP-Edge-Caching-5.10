@@ -8,6 +8,9 @@ let cachingService = null
 export function setupSocketHandlers(io) {
   simulationService = new SimulationService(io)
 
+  // 异步获取高德真实车辆路径（有缓存时不发请求）
+  simulationService.fetchAmapRoutesAsync()
+
   // 初始化 RSU 缓存命中率服务，注入到 SimulationService
   cachingService = new CachingService(io)
   setCachingService(cachingService)

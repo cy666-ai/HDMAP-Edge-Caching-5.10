@@ -44,18 +44,67 @@ end
 disp(['加载数据: ', json_file]);
 sim_data = load_vehicle_json(json_file);
 
-% 提取 RSU 交叉口坐标（9 个十字路口）
-RSU_positions = zeros(9, 2);
-for i = 1:9
-    RSU_positions(i, 1) = sim_data.intersections(i).latitude;
-    RSU_positions(i, 2) = sim_data.intersections(i).longitude;
+% 确保必要字段存在（兼容不同版本的JSON结构）
+if ~isfield(sim_data, 'rsuRegions')
+    % 使用内置部署方案
+    sim_data.rsuRegions = struct();
+    sim_data.rsuRegions.E = 3;
+    sim_data.rsuRegions.Prob_Route = [0.65, 0.95, 0.5];
+    sim_data.rsuRegions.RSU_per_region = [28, 34, 25];
+    sim_data.algorithmParams = struct();
+    sim_data.algorithmParams.X = 150;
+    sim_data.algorithmParams.alpha = 0.8;
+    sim_data.algorithmParams.Capacity_Scale = 1.2;
+    sim_data.algorithmParams.allowed_layers_per_block = [3, 4, 4];
+    layer_profit_ranges.Raw = [25, 35];
+    layer_profit_ranges.Geo = [15, 25];
+    layer_profit_ranges.Sem = [8, 15];
+    layer_profit_ranges.Dyn = [-5, 5];
+    sim_data.algorithmParams.layer_profit_ranges = layer_profit_ranges;
+    sim_data.vehicles = struct([]);
+    disp('JSON不含rsuRegions字段，使用默认参数。');
 end
 
-% 提取路线概率
-Prob_Route = sim_data.rsuRegions.Prob_Route;  % 长度 E=3
+%% ==================== RSU 部署生成 ====================
+% 使用综合部署方案：地铁站 + 道路覆盖
+% 优先从 GenerateRSUDeployment_Nanjing 生成（更可靠），
+% 如有车辆数据JSON中的intersections则以此为准
+if isfield(sim_data, 'intersections') && length(sim_data.intersections) >= 9
+    % 从JSON加载RSU位置（由 exportVehicleData.mjs 生成）
+    total_rsu = length(sim_data.intersections);
+    RSU_positions = zeros(total_rsu, 2);
+    RSU_names = cell(total_rsu, 1);
+    RSU_regions = zeros(total_rsu, 1);
+    for i = 1:total_rsu
+        RSU_positions(i, 1) = sim_data.intersections(i).latitude;
+        RSU_positions(i, 2) = sim_data.intersections(i).longitude;
+        RSU_names{i} = sim_data.intersections(i).name;
+        if isfield(sim_data.intersections(i), 'region')
+            RSU_regions(i) = sim_data.intersections(i).region;
+        end
+    end
+    disp(['从JSON加载 ', num2str(total_rsu), ' 个 RSU 坐标。']);
+else
+    % 从MATLAB内置函数生成RSU部署方案
+    disp('JSON不含RSU坐标，使用内置 GenerateRSUDeployment_Nanjing 生成...');
+    RSU_Result = GenerateRSUDeployment_Nanjing();
+    RSU_positions = RSU_Result.positions;
+    RSU_names = RSU_Result.names;
+    RSU_regions = RSU_Result.region;
+    total_rsu = RSU_Result.totalRSU;
+end
+
+% 提取路线概率（jsondecode 返回列向量，转置为行向量）
+Prob_Route = sim_data.rsuRegions.Prob_Route(:)';  % 强制转为行向量，长度 E=3
 E = sim_data.rsuRegions.E;
+
+% RSU_per_region 可能为标量（旧格式3）或数组（新格式如[28,34,25]）
 RSU_per_region = sim_data.rsuRegions.RSU_per_region;
-total_rsu = sim_data.rsuRegions.totalRSU;
+if isscalar(RSU_per_region)
+    RSU_per_region = repmat(RSU_per_region, 1, E); % 兼容旧数据
+else
+    RSU_per_region = RSU_per_region(:)'; % 强制转为行向量
+end
 
 % 提取算法参数
 alg_params = sim_data.algorithmParams;
@@ -81,7 +130,7 @@ TOTAL_TILES = E * X;
 fprintf('RSU 区域数: %d\n', E);
 fprintf('每区域瓦片数: %d\n', X);
 fprintf('总瓦片数: %d\n', TOTAL_TILES);
-fprintf('总 RSU 数: %d (每区域 %d 个)\n', total_rsu, RSU_per_region);
+fprintf('总 RSU 数: %d (各区域: [%s])\n', total_rsu, num2str(RSU_per_region));
 
 % 瓦片大小配置
 Tile_Size = ones(1, TOTAL_TILES);
@@ -234,17 +283,26 @@ disp(['最终缓存瓦片总数: ', num2str(sum(CacheDecision_Final))]);
 
 % 按 RSU 区域统计
 fprintf('\n%-10s %-12s %-12s %-12s %-12s\n', ...
-    '区域', 'RSU IDs', '缓存瓦片', '容量上限', '区域效用');
+    '区域', 'RSU数量', '缓存瓦片', '容量上限', '区域效用');
 fprintf('---------------------------------------------------------------------\n');
 for r = 1:E
     start_idx = (r-1)*X + 1;
     end_idx = r*X;
-    rsu_start = (r-1)*RSU_per_region + 1;
-    rsu_end = r*RSU_per_region;
+    % 计算该区域的RSU ID范围
+    if exist('RSU_regions', 'var') && length(unique(RSU_regions)) > 1
+        rsu_indices = find(RSU_regions == r);
+        if ~isempty(rsu_indices)
+            rsu_range_str = sprintf('[%d..%d]', rsu_indices(1), rsu_indices(end));
+        else
+            rsu_range_str = '[]';
+        end
+    else
+        rsu_range_str = sprintf('[%d..%d]', r, r);
+    end
     RSU_Total_Utility = sum(CacheDecision_Final(start_idx:end_idx) .* W_net(start_idx:end_idx));
 
-    fprintf('区域 %d     [%d,%d,%d]     %-8d     %-8d     %.2f\n', ...
-        r, rsu_start, rsu_start+1, rsu_end, ...
+    fprintf('区域 %d     %-10s %-12d     %-8d     %.2f\n', ...
+        r, rsu_range_str, ...
         sum(CacheDecision_Final(start_idx:end_idx)), C_RSU(r), RSU_Total_Utility);
 end
 
@@ -325,7 +383,11 @@ disp(['TRWC 总命中率: ', num2str(CHR_TRWC_Total, '%.4f')]);
 disp(' ');
 disp('=== 可视化 ===');
 try
-    PlotRSUNetwork_Nanjing(RSU_positions);
+    if exist('RSU_regions', 'var') && length(unique(RSU_regions)) > 1
+        PlotRSUNetwork_Nanjing(RSU_positions, RSU_regions, true);
+    else
+        PlotRSUNetwork_Nanjing(RSU_positions);
+    end
     disp('RSU 网络拓扑图已生成。');
 catch ME
     disp(['可视化跳过: ', ME.message]);
@@ -335,20 +397,25 @@ end
 disp(' ');
 disp('=== 导出结果到文件 ===');
 output_file = 'Nanjing_Simulation_Results.txt';
-fid = fopen(output_file, 'w', 'utf-8');
+fid = fopen(output_file, 'w');
 
 fprintf(fid, '=============================================\n');
 fprintf(fid, '  HDMAP-Edge Caching 5.10 仿真结果             \n');
 fprintf(fid, '  南京鼓楼区 | %s\n', datestr(now));
 fprintf(fid, '=============================================\n\n');
 
-fprintf(fid, '一、RSU 部署位置（交叉口，经纬度）\n');
+fprintf(fid, '一、RSU 部署位置（地铁站 + 道路覆盖，经纬度）\n');
 fprintf(fid, '-------------------------------------\n');
-fprintf(fid, '%-6s %-12s %-12s %s\n', 'RSU#', '纬度', '经度', '路口');
-fprintf(fid, '--------------------------------------------------\n');
+fprintf(fid, '%-6s %-12s %-12s %-6s %s\n', 'RSU#', '纬度', '经度', '区域', '位置');
+fprintf(fid, '--------------------------------------------------------\n');
 for i = 1:total_rsu
-    fprintf(fid, '%-6d %-12.4f %-12.4f %s\n', ...
-        i, RSU_positions(i,1), RSU_positions(i,2), ...
+    if exist('RSU_regions', 'var') && length(RSU_regions) >= i
+        r_label = sprintf('R%d', RSU_regions(i));
+    else
+        r_label = '-';
+    end
+    fprintf(fid, '%-6d %-12.6f %-12.6f %-6s %s\n', ...
+        i, RSU_positions(i,1), RSU_positions(i,2), r_label, ...
         sim_data.intersections(i).name);
 end
 
@@ -365,7 +432,7 @@ end
 fprintf(fid, '\n三、路线概率 Prob_Route\n');
 fprintf(fid, '-------------------------------------\n');
 fprintf(fid, 'E (区域数): %d\n', E);
-fprintf(fid, '每区域 RSU 数: %d\n', RSU_per_region);
+fprintf(fid, '每区域 RSU 数: [%s]\n', num2str(RSU_per_region));
 fprintf(fid, '总 RSU 数: %d\n', total_rsu);
 fprintf(fid, 'Prob_Route: [%s]\n', num2str(Prob_Route, '%.4f '));
 
@@ -383,8 +450,13 @@ for r = 1:E
     start_idx = (r-1)*X + 1;
     end_idx = r*X;
     RSU_Total_Utility = sum(CacheDecision_Final(start_idx:end_idx) .* W_net(start_idx:end_idx));
-    fprintf(fid, '  区域 %d: 缓存=%d/%d, 容量上限=%d, 效用=%.2f\n', ...
-        r, sum(CacheDecision_Final(start_idx:end_idx)), X, C_RSU(r), RSU_Total_Utility);
+    if exist('RSU_regions', 'var') && length(unique(RSU_regions)) > 1
+        rsu_in_region = sum(RSU_regions == r);
+    else
+        rsu_in_region = RSU_per_region(r);
+    end
+    fprintf(fid, '  区域 %d: RSU数=%d, 缓存=%d/%d, 容量上限=%d, 效用=%.2f\n', ...
+        r, rsu_in_region, sum(CacheDecision_Final(start_idx:end_idx)), X, C_RSU(r), RSU_Total_Utility);
 end
 
 fprintf(fid, '\n五、对比算法结果\n');
@@ -401,65 +473,174 @@ disp(['结果已写入: ', output_file]);
 
 function sim_data = load_vehicle_json(filename)
     % 读取 simmap1.0 导出的 JSON 车辆轨迹数据
-    fid = fopen(filename, 'r', 'utf-8');
-    if fid == -1
-        error('无法打开文件: %s', filename);
+    try
+        raw = fileread(filename);
+    catch
+        error('无法读取文件: %s', filename);
     end
-    raw = fread(fid, inf, '*char')';
-    fclose(fid);
-    sim_data = jsondecode(raw);
+
+    % 安全的 JSON 解码
+    try
+        sim_data = jsondecode(raw);
+    catch ME_json
+        disp(['JSON解析失败，使用默认参数。错误: ', ME_json.message]);
+        % 返回一个最小结构，让主程序运行
+        sim_data = struct();
+        sim_data.vehicles = struct([]);
+        sim_data.rsuRegions = struct();
+        sim_data.rsuRegions.E = 3;
+        sim_data.rsuRegions.Prob_Route = [0.65, 0.95, 0.5];
+        sim_data.rsuRegions.RSU_per_region = [28, 34, 25];
+        sim_data.algorithmParams = struct();
+        sim_data.algorithmParams.X = 150;
+        sim_data.algorithmParams.alpha = 0.8;
+        sim_data.algorithmParams.Capacity_Scale = 1.2;
+        sim_data.algorithmParams.allowed_layers_per_block = [3, 4, 4];
+        prof.Raw = [25, 35];
+        prof.Geo = [15, 25];
+        prof.Sem = [8, 15];
+        prof.Dyn = [-5, 5];
+        sim_data.algorithmParams.layer_profit_ranges = prof;
+    end
 end
 
-function PlotRSUNetwork_Nanjing(RSU_positions)
-    % 绘制南京道路网络和 RSU 部署图
+function PlotRSUNetwork_Nanjing(RSU_positions, RSU_regions, extra_roads_flag)
+    % 绘制南京道路网络和 RSU 部署图（支持综合部署方案）
+    % 输入:
+    %   RSU_positions: N×2矩阵 [纬度, 经度]
+    %   RSU_regions: 可选的N×1区域向量 (1=北区, 2=中区, 3=南区)
+    %   extra_roads_flag: 是否绘制扩展道路
 
-    % 道路端点定义 (与车辆数据一致)
+    if nargin < 2, RSU_regions = []; end
+    if nargin < 3, extra_roads_flag = true; end
+
+    % 道路端点定义（6条主要道路 + 3条扩展道路）
     roads_ns = {
-        '中山北路', 32.083, 118.771, 32.038, 118.767;
-        '中央路',   32.078, 118.782, 32.042, 118.781;
-        '虎踞路',   32.076, 118.752, 32.038, 118.752;
+        '中山北路', 32.083000, 118.771000, 32.038000, 118.767000;
+        '中央路',   32.078000, 118.782000, 32.042000, 118.781000;
+        '虎踞路',   32.076000, 118.752000, 32.038000, 118.752000;
         };
     roads_ew = {
-        '北京西路',   32.058, 118.750, 32.058, 118.792;
-        '汉中路',     32.046, 118.758, 32.046, 118.792;
-        '新模范马路', 32.072, 118.758, 32.072, 118.792;
+        '北京西路',   32.058000, 118.750000, 32.058000, 118.792000;
+        '汉中路',     32.046000, 118.758000, 32.046000, 118.792000;
+        '新模范马路', 32.072000, 118.758000, 32.072000, 118.792000;
+        };
+    extra_roads = {
+        '北京东路',   32.059000, 118.783000, 32.059000, 118.801000;
+        '中山南路',   32.046000, 118.783000, 32.038000, 118.783000;
+        '模范西路',   32.076000, 118.752000, 32.076000, 118.758000;
         };
 
-    figure('Color', 'white', 'Position', [100, 100, 900, 700]);
+    % 区域颜色和名称
+    region_colors = {[0.85, 0.33, 0.10], [0.00, 0.45, 0.74], [0.47, 0.67, 0.19]};
+    region_labels = {'北区-新模范马路走廊', '中区-北京西路走廊（核心区）', '南区-汉中路走廊'};
+    region_boundary_lats = [32.065000, 32.050000];  % 区域边界线纬度
+
+    figure('Color', 'white', 'Position', [100, 100, 1100, 750]);
     hold on; grid on; box on;
 
-    % 绘制南北道路
+    % 绘制区域边界虚线（水平线分隔北区/中区/南区）
+    for b = 1:length(region_boundary_lats)
+        plot([118.735000, 118.810000], [region_boundary_lats(b), region_boundary_lats(b)], ...
+            '--', 'Color', [0.6, 0.6, 0.6], 'LineWidth', 1, 'HandleVisibility', 'off');
+    end
+
+    % 绘制南北道路（蓝色系）
+    ns_color = [0.30, 0.45, 0.80];
     for i = 1:size(roads_ns, 1)
         lat1 = roads_ns{i, 2}; lng1 = roads_ns{i, 3};
         lat2 = roads_ns{i, 4}; lng2 = roads_ns{i, 5};
-        plot([lng1, lng2], [lat1, lat2], 'b-', 'LineWidth', 2, 'DisplayName', roads_ns{i, 1});
+        plot([lng1, lng2], [lat1, lat2], 'Color', ns_color, ...
+            'LineWidth', 2.5, 'DisplayName', roads_ns{i, 1});
     end
 
-    % 绘制东西道路
+    % 绘制东西道路（红色系）
+    ew_color = [0.80, 0.30, 0.30];
     for i = 1:size(roads_ew, 1)
         lat1 = roads_ew{i, 2}; lng1 = roads_ew{i, 3};
         lat2 = roads_ew{i, 4}; lng2 = roads_ew{i, 5};
-        plot([lng1, lng2], [lat1, lat2], 'r-', 'LineWidth', 2, 'DisplayName', roads_ew{i, 1});
+        plot([lng1, lng2], [lat1, lat2], 'Color', ew_color, ...
+            'LineWidth', 2.5, 'DisplayName', roads_ew{i, 1});
     end
 
-    % 绘制 RSU 节点
-    h_rsu = scatter(RSU_positions(:,2), RSU_positions(:,1), 120, ...
-        'k', 'filled', 'MarkerEdgeColor', 'w', 'LineWidth', 1.5, 'DisplayName', 'RSU');
+    % 绘制扩展道路（灰色虚线）
+    if extra_roads_flag
+        for i = 1:size(extra_roads, 1)
+            lat1 = extra_roads{i, 2}; lng1 = extra_roads{i, 3};
+            lat2 = extra_roads{i, 4}; lng2 = extra_roads{i, 5};
+            plot([lng1, lng2], [lat1, lat2], '--', 'Color', [0.5, 0.5, 0.5], ...
+                'LineWidth', 1.5, 'DisplayName', extra_roads{i, 1});
+        end
+    end
 
-    % 标注 RSU 编号
-    for i = 1:size(RSU_positions, 1)
-        text(RSU_positions(i,2) + 0.001, RSU_positions(i,1) + 0.0005, ...
-            num2str(i), 'FontSize', 11, 'FontWeight', 'bold', 'Color', 'blue');
+    % 标注地铁站符号（8座车站：鼓楼站方圆2.5km内）
+    metro_locs = [
+            32.059120, 118.783850;  % 鼓楼站
+            32.072340, 118.778970;  % 玄武门站
+            32.081900, 118.778600;  % 新模范马路站
+            32.052990, 118.778970;  % 珠江路站
+            32.040990, 118.784030;  % 新街口站
+            32.061100, 118.769490;  % 云南路站
+            32.059600, 118.792660;  % 鸡鸣寺站
+            32.057300, 118.800700;  % 九华山站
+        ];
+    scatter(metro_locs(:,2), metro_locs(:,1), 180, ...
+        'p', 'MarkerEdgeColor', [0.8, 0.6, 0], 'MarkerFaceColor', [1, 0.85, 0.2], ...
+        'LineWidth', 2, 'DisplayName', '地铁站');
+
+    % 按区域着色绘制 RSU 节点
+    if ~isempty(RSU_regions) && length(unique(RSU_regions)) > 1
+        for r = 1:3
+            idx = (RSU_regions == r);
+            if any(idx)
+                scatter(RSU_positions(idx,2), RSU_positions(idx,1), 100, ...
+                    'o', 'MarkerFaceColor', region_colors{r}, ...
+                    'MarkerEdgeColor', 'w', 'LineWidth', 1.5, ...
+                    'DisplayName', sprintf('RSU-%s', region_labels{r}));
+            end
+        end
+    else
+        scatter(RSU_positions(:,2), RSU_positions(:,1), 100, ...
+            'k', 'filled', 'MarkerEdgeColor', 'w', 'LineWidth', 1.5, ...
+            'DisplayName', 'RSU');
+    end
+
+    % 标注 RSU 编号（密集时用小字体）
+    num_rsu = size(RSU_positions, 1);
+    if num_rsu > 30
+        font_sz = 7;
+        offset = 0.0008;
+    elseif num_rsu > 15
+        font_sz = 9;
+        offset = 0.001;
+    else
+        font_sz = 11;
+        offset = 0.001;
+    end
+    for i = 1:num_rsu
+        text(RSU_positions(i,2) + offset, RSU_positions(i,1) + offset/2, ...
+            num2str(i), 'FontSize', font_sz, 'FontWeight', 'bold', ...
+            'Color', [0.2, 0.2, 0.2], 'HandleVisibility', 'off');
+    end
+
+    % 添加区域标签
+    y_positions = [32.077000, 32.062000, 32.047000];
+    for r = 1:3
+        text(118.742000, y_positions(r), region_labels{r}, ...
+            'FontSize', 11, 'FontWeight', 'bold', 'Color', region_colors{r}, ...
+            'BackgroundColor', [1,1,1,0.7], 'EdgeColor', region_colors{r}, ...
+            'HandleVisibility', 'off');
     end
 
     xlabel('经度', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('纬度', 'FontSize', 12, 'FontWeight', 'bold');
-    title('南京鼓楼区道路网络及 RSU 部署', 'FontSize', 14, 'FontWeight', 'bold');
-    legend('Location', 'best');
+    title(sprintf('南京鼓楼区道路网络及 RSU 综合部署 (%d 个RSU, 含地铁站+道路覆盖)', num_rsu), ...
+        'FontSize', 13, 'FontWeight', 'bold');
+    legend('Location', 'southeast', 'FontSize', 9);
     axis equal;
-    xlim([118.74, 118.80]);
-    ylim([32.035, 32.090]);
+    xlim([118.735000, 118.810000]);
+    ylim([32.033000, 32.087000]);
     hold off;
 
-    disp('RSU 网络拓扑图已生成（南京鼓楼区）');
+    disp(['RSU 网络拓扑图已生成（', num2str(num_rsu), ' 个RSU, 含8个地铁站+道路覆盖）']);
 end

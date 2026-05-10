@@ -24,13 +24,17 @@ const AMAP_KEY = process.env.AMAP_KEY || '4bf282e07d4faf6337a82a21d755c796'
 // origin/destination 格式: "经度,纬度"（高德 API 要求）
 const ROADS = [
   // 南北向
-  { id: 1, name: '中山北路',   origin: '118.771,32.083', destination: '118.767,32.038' },
-  { id: 2, name: '中央路',     origin: '118.782,32.078', destination: '118.781,32.042' },
-  { id: 3, name: '北京西路',   origin: '118.750,32.058', destination: '118.792,32.058' },
+  { id: 1, name: '中山北路',   origin: '118.771000,32.083000', destination: '118.767000,32.038000' },
+  { id: 2, name: '中央路',     origin: '118.782000,32.078000', destination: '118.781000,32.042000' },
+  { id: 3, name: '北京西路',   origin: '118.750000,32.058000', destination: '118.792000,32.058000' },
   // 东西向
-  { id: 4, name: '汉中路',     origin: '118.758,32.046', destination: '118.792,32.046' },
-  { id: 5, name: '新模范马路', origin: '118.758,32.072', destination: '118.792,32.072' },
-  { id: 6, name: '虎踞路',     origin: '118.752,32.076', destination: '118.752,32.038' },
+  { id: 4, name: '汉中路',     origin: '118.758000,32.046000', destination: '118.792000,32.046000' },
+  { id: 5, name: '新模范马路', origin: '118.758000,32.072000', destination: '118.792000,32.072000' },
+  { id: 6, name: '虎踞路',     origin: '118.752000,32.076000', destination: '118.752000,32.038000' },
+  // 扩展覆盖道路
+  { id: 7, name: '北京东路',   origin: '118.783000,32.059000', destination: '118.801000,32.059000' },
+  { id: 8, name: '中山南路',   origin: '118.783000,32.046000', destination: '118.783000,32.038000' },
+  { id: 9, name: '模范西路',   origin: '118.752000,32.076000', destination: '118.758000,32.076000' },
 ]
 
 const API_URL = 'https://restapi.amap.com/v5/direction/driving'
@@ -106,7 +110,7 @@ async function main() {
   }
 
   const result = {
-    center: { latitude: 32.059, longitude: 118.769 },
+    center: { latitude: 32.059000, longitude: 118.769000 },
     roads: roadNetwork,
     updatedAt: new Date().toISOString()
   }

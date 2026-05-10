@@ -18,7 +18,9 @@ const DATA_DIR = path.resolve(__dirname, '../data')
 
 // 默认算法参数（与 5.10/HM_Sim_Main_Nanjing.m 一致）
 const DEFAULT_INPUT = {
-  Prob_Route: [0.95, 0.725, 0.5],
+  // Prob_Route 基于综合RSU部署方案 (87个RSU: 北区28, 中区34, 南区25)
+  // 由 GenerateRSUDeployment_Nanjing.m 自动计算的概率值
+  Prob_Route: [0.6500, 0.9500, 0.5000],
   algorithmParams: {
     E: 3,
     X: 150,
@@ -32,8 +34,8 @@ const DEFAULT_INPUT = {
       Dyn: [-5, 5],
     },
   },
-  regionCounts: [2, 2, 1],
-  vehicleCount: 5,
+  regionCounts: [28, 34, 25],
+  vehicleCount: 10,
   timestamp: new Date().toISOString(),
 }
 

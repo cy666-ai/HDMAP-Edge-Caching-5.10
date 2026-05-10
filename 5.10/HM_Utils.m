@@ -211,85 +211,165 @@ end
 function [X, Y] = latlon2utm_nanjing(lat, lon)
     % LATLON2UTM_NANJING - 南京地区经纬度到UTM坐标转换
     % 输入:
-    %   lat: 纬度向量（度），南京鼓楼区中心约32.059°N
-    %   lon: 经度向量（度），南京鼓楼区中心约118.769°E
+    %   lat: 纬度向量（度），南京鼓楼区中心约32.059000°N
+    %   lon: 经度向量（度），南京鼓楼区中心约118.769000°E
     % 输出:
     %   X, Y: UTM坐标（米），基于UTM Zone 50N
     %
-    % UTM Zone 50N 覆盖东经114°-120°，南京(118.769°E)在此范围内
+    % UTM Zone 50N 覆盖东经114°-120°，南京(118.769000°E)在此范围内
 
     K_lat = 110940;           % 1°纬度 ≈ 110940米
-    K_lon = 94563;            % 1°经度 ≈ 94563米 (cos(32.059°)×111320)
+    K_lon = 94563;            % 1°经度 ≈ 94563米 (cos(32.059000°)×111320)
 
     X = (lon - lon(1)) * K_lon;
     Y = (lat - lat(1)) * K_lat;
 end
 
-%% ==================== 南京鼓楼区 RSU 网络可视化函数 ====================
-function PlotRSUNetwork_Nanjing(RSU_positions)
-    % PLOTRSUNETWORK_NANJING - 绘制南京鼓楼区道路网络和RSU部署图
+%% ==================== 南京鼓楼区 RSU 网络可视化函数（综合部署版） ====================
+function PlotRSUNetwork_Nanjing(RSU_positions, RSU_regions, extra_roads_flag)
+    % PLOTRSUNETWORK_NANJING - 绘制南京鼓楼区道路网络和RSU综合部署图
     % 输入:
     %   RSU_positions: N×2 矩阵 [纬度, 经度]
+    %   RSU_regions: 可选的N×1区域向量 (1=北区, 2=中区, 3=南区)
+    %   extra_roads_flag: 是否绘制扩展道路（默认true）
     %
-    % 道路网络基于 simmap1.0 中6条鼓楼区道路（中山北路等）
+    % 部署方案包含：
+    %   1. 鼓楼站方圆2.5km内全部8座地铁站
+    %   2. 沿9条主要道路每隔~350m部署的RSU
 
-    % 南北道路: [名称, 起点纬度, 起点经度, 终点纬度, 终点经度]
+    if nargin < 2, RSU_regions = []; end
+    if nargin < 3, extra_roads_flag = true; end
+
+    % 道路端点定义（6条主要道路 + 3条扩展道路）
     roads_ns = {
-        '中山北路', 32.083, 118.771, 32.038, 118.767;
-        '中央路',   32.078, 118.782, 32.042, 118.781;
-        '虎踞路',   32.076, 118.752, 32.038, 118.752;
+        '中山北路', 32.083000, 118.771000, 32.038000, 118.767000;
+        '中央路',   32.078000, 118.782000, 32.042000, 118.781000;
+        '虎踞路',   32.076000, 118.752000, 32.038000, 118.752000;
         };
-
-    % 东西道路
     roads_ew = {
-        '北京西路',   32.058, 118.750, 32.058, 118.792;
-        '汉中路',     32.046, 118.758, 32.046, 118.792;
-        '新模范马路', 32.072, 118.758, 32.072, 118.792;
+        '北京西路',   32.058000, 118.750000, 32.058000, 118.792000;
+        '汉中路',     32.046000, 118.758000, 32.046000, 118.792000;
+        '新模范马路', 32.072000, 118.758000, 32.072000, 118.792000;
+        };
+    extra_roads = {
+        '北京东路',   32.059000, 118.783000, 32.059000, 118.801000;
+        '中山南路',   32.046000, 118.783000, 32.038000, 118.783000;
+        '模范西路',   32.076000, 118.752000, 32.076000, 118.758000;
         };
 
-    figure('Color', 'white', 'Position', [100, 100, 900, 700]);
+    % 区域颜色和名称
+    region_colors = {[0.85, 0.33, 0.10], [0.00, 0.45, 0.74], [0.47, 0.67, 0.19]};
+    region_labels = {'北区-新模范马路走廊', '中区-北京西路走廊（核心区）', '南区-汉中路走廊'};
+    region_boundary_lats = [32.065000, 32.050000];  % 区域边界线纬度
+
+    figure('Color', 'white', 'Position', [100, 100, 1100, 750]);
     hold on; grid on; box on;
 
-    % 绘制南北道路（蓝色）
+    % 绘制区域边界虚线
+    for b = 1:length(region_boundary_lats)
+        plot([118.735000, 118.810000], [region_boundary_lats(b), region_boundary_lats(b)], ...
+            '--', 'Color', [0.6, 0.6, 0.6], 'LineWidth', 1, 'HandleVisibility', 'off');
+    end
+
+    % 绘制南北道路（蓝色系）
+    ns_color = [0.30, 0.45, 0.80];
     for i = 1:size(roads_ns, 1)
         lat1 = roads_ns{i, 2}; lng1 = roads_ns{i, 3};
         lat2 = roads_ns{i, 4}; lng2 = roads_ns{i, 5};
-        plot([lng1, lng2], [lat1, lat2], 'b-', 'LineWidth', 2, ...
-            'DisplayName', roads_ns{i, 1});
+        plot([lng1, lng2], [lat1, lat2], 'Color', ns_color, ...
+            'LineWidth', 2.5, 'DisplayName', roads_ns{i, 1});
     end
 
-    % 绘制东西道路（红色）
+    % 绘制东西道路（红色系）
+    ew_color = [0.80, 0.30, 0.30];
     for i = 1:size(roads_ew, 1)
         lat1 = roads_ew{i, 2}; lng1 = roads_ew{i, 3};
         lat2 = roads_ew{i, 4}; lng2 = roads_ew{i, 5};
-        plot([lng1, lng2], [lat1, lat2], 'r-', 'LineWidth', 2, ...
-            'DisplayName', roads_ew{i, 1});
+        plot([lng1, lng2], [lat1, lat2], 'Color', ew_color, ...
+            'LineWidth', 2.5, 'DisplayName', roads_ew{i, 1});
     end
 
-    % 绘制 RSU 节点
-    h_rsu = scatter(RSU_positions(:,2), RSU_positions(:,1), 120, ...
-        'k', 'filled', 'MarkerEdgeColor', 'w', 'LineWidth', 1.5, ...
-        'DisplayName', 'RSU节点');
+    % 绘制扩展道路（灰色虚线）
+    if extra_roads_flag
+        for i = 1:size(extra_roads, 1)
+            lat1 = extra_roads{i, 2}; lng1 = extra_roads{i, 3};
+            lat2 = extra_roads{i, 4}; lng2 = extra_roads{i, 5};
+            plot([lng1, lng2], [lat1, lat2], '--', 'Color', [0.5, 0.5, 0.5], ...
+                'LineWidth', 1.5, 'DisplayName', extra_roads{i, 1});
+        end
+    end
 
-    % 标注 RSU 编号
-    for i = 1:size(RSU_positions, 1)
-        text(RSU_positions(i,2) + 0.001, RSU_positions(i,1) + 0.0005, ...
-            num2str(i), 'FontSize', 11, 'FontWeight', 'bold', ...
-            'Color', 'blue', 'HandleVisibility', 'off');
+    % 标注地铁站
+    metro_locs = [
+        32.059120, 118.783850;  % 鼓楼站
+        32.072340, 118.778970;  % 玄武门站
+        32.081900, 118.778600;  % 新模范马路站
+        32.052990, 118.778970;  % 珠江路站
+        32.040990, 118.784030;  % 新街口站
+        32.061100, 118.769490;  % 云南路站
+        32.059600, 118.792660;  % 鸡鸣寺站
+        32.057300, 118.800700;  % 九华山站
+    ];
+    scatter(metro_locs(:,2), metro_locs(:,1), 180, ...
+        'p', 'MarkerEdgeColor', [0.8, 0.6, 0], 'MarkerFaceColor', [1, 0.85, 0.2], ...
+        'LineWidth', 2, 'DisplayName', '地铁站');
+
+    % 按区域着色绘制 RSU 节点
+    if ~isempty(RSU_regions) && length(unique(RSU_regions)) > 1
+        for r = 1:3
+            idx = (RSU_regions == r);
+            if any(idx)
+                scatter(RSU_positions(idx,2), RSU_positions(idx,1), 100, ...
+                    'o', 'MarkerFaceColor', region_colors{r}, ...
+                    'MarkerEdgeColor', 'w', 'LineWidth', 1.5, ...
+                    'DisplayName', sprintf('RSU-%s', region_labels{r}));
+            end
+        end
+    else
+        scatter(RSU_positions(:,2), RSU_positions(:,1), 100, ...
+            'k', 'filled', 'MarkerEdgeColor', 'w', 'LineWidth', 1.5, ...
+            'DisplayName', 'RSU');
+    end
+
+    % 标注 RSU 编号（密集时用小字体）
+    num_rsu = size(RSU_positions, 1);
+    if num_rsu > 30
+        font_sz = 7;
+        offset = 0.0008;
+    elseif num_rsu > 15
+        font_sz = 9;
+        offset = 0.001;
+    else
+        font_sz = 11;
+        offset = 0.001;
+    end
+    for i = 1:num_rsu
+        text(RSU_positions(i,2) + offset, RSU_positions(i,1) + offset/2, ...
+            num2str(i), 'FontSize', font_sz, 'FontWeight', 'bold', ...
+            'Color', [0.2, 0.2, 0.2], 'HandleVisibility', 'off');
+    end
+
+    % 添加区域标签
+    y_positions = [32.077000, 32.062000, 32.047000];
+    for r = 1:3
+        text(118.742000, y_positions(r), region_labels{r}, ...
+            'FontSize', 11, 'FontWeight', 'bold', 'Color', region_colors{r}, ...
+            'BackgroundColor', [1,1,1,0.7], 'EdgeColor', region_colors{r}, ...
+            'HandleVisibility', 'off');
     end
 
     xlabel('经度', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('纬度', 'FontSize', 12, 'FontWeight', 'bold');
-    title('南京鼓楼区道路网络及 RSU 部署', 'FontSize', 14, 'FontWeight', 'bold');
-    legend('Location', 'best');
+    title(sprintf('南京鼓楼区道路网络及 RSU 综合部署 (%d 个RSU, 含地铁站+道路覆盖)', num_rsu), ...
+        'FontSize', 13, 'FontWeight', 'bold');
+    legend('Location', 'southeast', 'FontSize', 9);
     axis equal;
-    xlim([118.74, 118.82]);
-    ylim([32.035, 32.085]);
+    xlim([118.735000, 118.810000]);
+    ylim([32.033000, 32.087000]);
     hold off;
 
     disp('=== 南京鼓楼区 RSU 网络可视化 ===');
-    disp(['共 ', num2str(size(roads_ns,1) + size(roads_ew,1)), ' 条道路, ', ...
-          num2str(size(RSU_positions,1)), ' 个 RSU 节点']);
+    disp(['共 9 条道路, ', num2str(num_rsu), ' 个 RSU 节点（含8个地铁站）']);
 end
 
 function [length_meters] = CalculateRoadLength(lat1, lon1, lat2, lon2)
