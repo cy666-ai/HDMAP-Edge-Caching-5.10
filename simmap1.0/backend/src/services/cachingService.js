@@ -20,8 +20,8 @@ const DATA_DIR = path.resolve(__dirname, '../../data')
 
 // 算法参数（与 MATLAB 默认值一致）
 const ALGO_PARAMS = {
-  alpha: 0.8,
-  Capacity_Scale: 1.2,
+  alpha: 0.055,
+  Capacity_Scale: 2.0,
   allowed_layers_per_block: [3, 4, 4],
   layer_profit_ranges: {
     Raw: [25, 35],

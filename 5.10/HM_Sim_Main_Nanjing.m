@@ -157,7 +157,11 @@ psi = zeros(1, TOTAL_TILES);
 for r = 1:E
     start_idx = (r-1) * X + 1;
     end_idx = r * X;
-    psi(start_idx:end_idx) = psi_matrix(r, start_idx:end_idx);
+    % 修改 (v5.10 批次计算): 根据 RSU 在批次内的位置决定取哪段列
+    col_offset = mod(r-1, 3);
+    col_start = col_offset * X + 1;
+    col_end = (col_offset + 1) * X;
+    psi(start_idx:end_idx) = psi_matrix(r, col_start:col_end);
 end
 
 %% ==================== 3. 动态分配瓦块层级和索引 ====================

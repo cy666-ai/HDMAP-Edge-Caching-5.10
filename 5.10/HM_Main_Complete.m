@@ -17,7 +17,7 @@ X = 150;                % 每个 RSU 区域的瓦片数量
 % Prob_Route: 路线概率向量，根据RSU数量E自动生成递减序列
 % 生成规则: 从高概率(0.95)线性递减到低概率(0.5)，提高整体访问概率
 Prob_Route = linspace(0.95, max(0.5, 0.95 - 0.4*(E-1)/E), E);
-alpha = 0.8;            % 惩罚因子 (降低惩罚，让更多瓦片获得正收益，提高命中率)
+alpha = 0.055;          % 惩罚因子 (v5.10: 0.055 → 1-hop~100块, 3-hop~60块)
 
 % 瓦片大小配置 (可根据实际需求调整)
 Tile_Size = ones(1, E * X);  % 所有瓦片大小为1
@@ -35,7 +35,7 @@ layer_profit_ranges = {
 };
 
 % 容量放大系数 - 增加整体缓存容量，提高命中率
-Capacity_Scale = 1.2;  % 容量放大1.2倍
+Capacity_Scale = 2.0;  % 容量放大2.0倍（C_RSU = round(0.5*X*2.0) = X = 100）
 
 % 随机种子（固定以保证结果可复现）
 rng(42);
@@ -72,7 +72,11 @@ psi = zeros(1, TOTAL_TILES);
 for r = 1:E
     start_idx = (r-1) * X + 1;
     end_idx = r * X;
-    psi(start_idx:end_idx) = psi_matrix(r, start_idx:end_idx);
+    % 修改 (v5.10 批次计算): 根据 RSU 在批次内的位置决定取哪段列
+    col_offset = mod(r-1, 3);
+    col_start = col_offset * X + 1;
+    col_end = (col_offset + 1) * X;
+    psi(start_idx:end_idx) = psi_matrix(r, col_start:col_end);
 end
 
 %% ==================== 2. 动态分配瓦块层级和索引 ====================

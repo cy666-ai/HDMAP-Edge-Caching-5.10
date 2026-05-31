@@ -1,7 +1,7 @@
 {
   "algorithmParams": {
-    "alpha": 0.8,
-    "Capacity_Scale": 1.2,
+    "alpha": 0.055,
+    "Capacity_Scale": 2,
     "allowed_layers_per_block": [
       3,
       4,
@@ -32,43 +32,43 @@
       "routeName": "古平岗→新庄",
       "E": 13,
       "X": 100,
-      "vehicleCount": 1
+      "vehicleCount": 0
     },
     {
       "routeId": 2,
       "routeName": "草场门→九华山",
       "E": 11,
       "X": 100,
-      "vehicleCount": 1
+      "vehicleCount": 0
     },
     {
       "routeId": 3,
       "routeName": "汉中门→西安门",
       "E": 8,
       "X": 100,
-      "vehicleCount": 1
+      "vehicleCount": 0
     },
     {
       "routeId": 4,
       "routeName": "古平岗→汉中门",
       "E": 7,
       "X": 100,
-      "vehicleCount": 1
+      "vehicleCount": 0
     },
     {
       "routeId": 5,
       "routeName": "新模范马路→新街口",
       "E": 8,
       "X": 100,
-      "vehicleCount": 1
+      "vehicleCount": 0
     },
     {
       "routeId": 6,
       "routeName": "新庄→西安门",
       "E": 7,
       "X": 100,
-      "vehicleCount": 1
+      "vehicleCount": 0
     }
   ],
-  "timestamp": "2026-05-31T10:49:04.835Z"
+  "timestamp": "2026-05-31T11:31:49.647Z"
 }

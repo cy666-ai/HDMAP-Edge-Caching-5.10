@@ -93,7 +93,15 @@ for route_idx = 1:num_routes
     for r = 1:E
         start_idx = (r-1) * X + 1;
         end_idx = r * X;
-        psi(start_idx:end_idx) = psi_matrix(r, start_idx:end_idx);
+        % 修改 (v5.10 批次计算):
+        % 概率矩阵 psi_matrix 的每行有 K=E*X 列，概率质量随卷积次数
+        % 漂移到不同的列范围。每 BATCH_SIZE=3 个 RSU 重置一次卷积基数，
+        % 所以每行取列的范围由 RSU 在批次内的位置决定:
+        %   批次位置 = mod(r-1, 3),  列范围 = 批次位置*X+1 ~ (批次位置+1)*X
+        col_offset = mod(r-1, 3);
+        col_start = col_offset * X + 1;
+        col_end = (col_offset + 1) * X;
+        psi(start_idx:end_idx) = psi_matrix(r, col_start:col_end);
     end
 
     %% ==================== 2. 瓦块层级分配 ====================
