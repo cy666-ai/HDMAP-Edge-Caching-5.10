@@ -28,15 +28,19 @@ export const useVehicleStore = defineStore('vehicle', () => {
       speed: v.speed || 0,
       routeIndex: v.routeIndex || 0,
       requestedBlocks: v.requestedBlocks || [],
+      routeRsuIds: v.routeRsuIds || [],                     // 完整路由 RSU 序列（长久保存）
+      upcomingRsuIds: v.upcomingRsuIds || [],               // 从 vehicle:update 实时更新（每 tick）
     }))
   }
 
   function updateVehiclePosition(vehicleData) {
     const idx = vehicles.value.findIndex(v => v.id === vehicleData.id)
     if (idx !== -1) {
+      const existing = vehicles.value[idx]
       vehicles.value[idx] = {
-        ...vehicles.value[idx],
-        ...vehicleData
+        ...existing,
+        ...vehicleData,
+        upcomingRsuIds: existing.upcomingRsuIds || vehicleData.upcomingRsuIds || [],
       }
     } else {
       vehicles.value.push({
@@ -44,7 +48,26 @@ export const useVehicleStore = defineStore('vehicle', () => {
         heading: vehicleData.heading || 0,
         routeIndex: vehicleData.routeIndex || 0,
         requestedBlocks: vehicleData.requestedBlocks || [],
+        routeRsuIds: vehicleData.routeRsuIds || [],
+        upcomingRsuIds: vehicleData.upcomingRsuIds || [],
       })
+    }
+  }
+
+  /**
+   * 从 rsu:update 的 vehicleTiles 中合并实时 upcomingRsuIds 到每辆车
+   */
+  function updateVehicleUpcomingRsuIds(vehicleTiles) {
+    if (!vehicleTiles) return
+    for (const vehicleIdStr in vehicleTiles) {
+      const vehicleId = Number(vehicleIdStr)
+      const tileInfo = vehicleTiles[vehicleIdStr]
+      if (tileInfo && tileInfo.upcomingRsuIds) {
+        const v = vehicles.value.find(v => v.id === vehicleId)
+        if (v) {
+          v.upcomingRsuIds = tileInfo.upcomingRsuIds
+        }
+      }
     }
   }
 
@@ -103,6 +126,7 @@ export const useVehicleStore = defineStore('vehicle', () => {
     vehicleCount,
     updateVehicles,
     updateVehiclePosition,
+    updateVehicleUpcomingRsuIds,
     setSelectedVehicle,
     setDrivingStatus,
     setSpeedLevel,

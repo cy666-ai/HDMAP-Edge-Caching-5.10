@@ -2,34 +2,41 @@
 [DB] 数据模型同步完成
 [Simulation] 已加载 6 条高德地图真实车辆路径
 [Simulation] 已加载 9 条高德地图真实道路数据
-  [路线 1] 古平岗→新庄: 191 个路径点 (高德API)
-  [路线 2] 草场门→九华山: 161 个路径点 (高德API)
-  [路线 3] 汉中门→西安门: 102 个路径点 (高德API)
-  [路线 4] 古平岗→汉中门: 123 个路径点 (高德API)
+[rsuDeployment] 已加载 6 条高德API车辆行驶路径数据
+[rsuDeployment] 沿路径生成RSU候选点: 54
+[rsuDeployment] 部署完成: 54个RSU, 区域分布: [17, 20, 17], 路线RSU数: {
+  '古平岗→新庄': 13,
+  '草场门→九华山': 11,
+  '汉中门→西安门': 8,
+  '古平岗→汉中门': 7,
+  '新模范马路→新街口': 8,
+  '新庄→西安门': 7
+}
+  [路线 1] 古平岗→新庄: 139 个路径点 (高德API)
+  [路线 2] 草场门→九华山: 148 个路径点 (高德API)
+  [路线 3] 汉中门→西安门: 73 个路径点 (高德API)
+  [路线 4] 古平岗→汉中门: 150 个路径点 (高德API)
   [路线 5] 新模范马路→新街口: 89 个路径点 (高德API)
-  [路线 6] 新庄→西安门: 111 个路径点 (高德API)
+  [路线 6] 新庄→西安门: 68 个路径点 (高德API)
 [Simulation] 已初始化 30 辆车，分配至 6 条固定路线
 [Simulation] 高德路径数据已全部缓存，跳过在线获取
 [rsuDeployment] 已加载 6 条高德API车辆行驶路径数据
-[rsuDeployment] 沿路径生成RSU候选点: 35
-[rsuDeployment] 部署完成: 35个RSU, 区域分布: [13, 10, 12]
-node:events:486
-      throw er; // Unhandled 'error' event
-      ^
-
-Error: listen EADDRINUSE: address already in use :::3000
-    at Server.setupListenHandle [as _listen2] (node:net:1948:16)
-    at listenInCluster (node:net:2005:12)
-    at Server.listen (node:net:2110:7)
-    at file:///C:/Users/Administrator/Desktop/HdMAP-Code/HDMAP-Edge%20Caching%205.10/simmap1.0/backend/server.js:24:12
-Emitted 'error' event on Server instance at:
-    at emitErrorNT (node:net:1984:8)
-    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
-  code: 'EADDRINUSE',
-  errno: -4091,
-  syscall: 'listen',
-  address: '::',
-  port: 3000
+[rsuDeployment] 沿路径生成RSU候选点: 54
+[rsuDeployment] 部署完成: 54个RSU, 区域分布: [17, 20, 17], 路线RSU数: {
+  '古平岗→新庄': 13,
+  '草场门→九华山': 11,
+  '汉中门→西安门': 8,
+  '古平岗→汉中门': 7,
+  '新模范马路→新街口': 8,
+  '新庄→西安门': 7
 }
-
-Node.js v24.14.1
+[Caching] 已加载 54 个 RSU，按路线分布:
+  路线 1 古平岗→新庄: 13 个 RSU, 1300 个内容块
+  路线 2 草场门→九华山: 11 个 RSU, 1100 个内容块
+  路线 3 汉中门→西安门: 8 个 RSU, 800 个内容块
+  路线 4 古平岗→汉中门: 7 个 RSU, 700 个内容块
+  路线 5 新模范马路→新街口: 8 个 RSU, 800 个内容块
+  路线 6 新庄→西安门: 7 个 RSU, 700 个内容块
+[Server] 后端服务已启动: http://localhost:3000
+[Server] WebSocket 服务已就绪
+[Socket] 客户端已连接: VakF19MSiMBxRb8fAAAB

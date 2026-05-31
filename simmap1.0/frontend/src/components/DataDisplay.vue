@@ -57,11 +57,11 @@
       <div v-if="vehicleTileInfo" class="tile-progress">
         <div class="tile-progress-header">
           <span class="tile-progress-label">瓦片收集进度</span>
-          <span class="tile-progress-value">{{ vehicleTileInfo.collectedCount }} / 100</span>
+          <span class="tile-progress-value">{{ vehicleTileInfo.collectedCount }} / {{ selectedVehicle.requestedBlocks?.length || 0 }}</span>
         </div>
         <el-progress
-          :percentage="Math.min(100, vehicleTileInfo.collectedCount)"
-          :color="tileProgressColor(vehicleTileInfo.collectedCount)"
+          :percentage="tileProgressPercent"
+          :color="tileProgressColor"
           :stroke-width="14"
         />
         <div v-if="showTileIds && vehicleTileInfo.tileIds.length > 0" class="tile-id-list">
@@ -81,6 +81,26 @@
         >
           {{ showTileIds ? '收起瓦片列表' : '查看瓦片列表' }}
         </el-button>
+      </div>
+
+      <!-- 沿途 RSU 信息 -->
+      <div class="divider"></div>
+      <div class="section-title">沿途 RSU（实时）</div>
+      <div class="rsu-route-list">
+        <div class="rsu-route-count">共 {{ selectedVehicle?.upcomingRsuIds?.length || 0 }} 个 RSU</div>
+        <div class="rsu-tags">
+          <span
+            v-for="rsuId in selectedVehicle?.upcomingRsuIds"
+            :key="rsuId"
+            class="rsu-tag"
+            :style="{
+              background: (rsuRouteMap.get(rsuId) ? ROUTE_COLORS[rsuRouteMap.get(rsuId)] : '#409EFF') + '22',
+              color: rsuRouteMap.get(rsuId) ? ROUTE_COLORS[rsuRouteMap.get(rsuId)] : '#409EFF',
+              borderColor: rsuRouteMap.get(rsuId) ? ROUTE_COLORS[rsuRouteMap.get(rsuId)] : '#d9ecff',
+            }"
+          >RSU #{{ rsuId }}</span>
+          <div v-if="!selectedVehicle?.upcomingRsuIds?.length" class="rsu-empty-text">暂无数据</div>
+        </div>
       </div>
     </template>
 
@@ -111,6 +131,24 @@ const vehicleStore = useVehicleStore()
 const connected = ref(false)
 const showTileIds = ref(false)
 
+// RSU ID → routeId 查找表（从 rsuData 构建）
+const rsuRouteMap = computed(() => {
+  const map = new Map()
+  const rsus = props.rsuData?.rsus
+  if (rsus) {
+    for (const rsu of rsus) {
+      map.set(rsu.id, rsu.routeId)
+    }
+  }
+  return map
+})
+
+// 路线颜色（与 MapView 保持一致）
+const ROUTE_COLORS = {
+  1: '#409EFF', 2: '#E6A23C', 3: '#67C23A',
+  4: '#F56C6C', 5: '#B37FEB', 6: '#36CFC9',
+}
+
 const selectedVehicle = computed(() => vehicleStore.selectedVehicle)
 const vehicleCount = computed(() => vehicleStore.vehicleCount)
 const elapsedTime = computed(() => vehicleStore.elapsedTime)
@@ -130,12 +168,19 @@ const vehicleTileInfo = computed(() => {
   return tiles[veh.id] || null
 })
 
-function tileProgressColor(count) {
-  if (count >= 100) return '#67C23A'
-  if (count > 50) return '#409EFF'
-  if (count > 20) return '#E6A23C'
+const tileProgressPercent = computed(() => {
+  const total = selectedVehicle.value?.requestedBlocks?.length || 0
+  if (total === 0) return 0
+  return Math.min(100, Math.round((vehicleTileInfo.value?.collectedCount || 0) / total * 100))
+})
+
+const tileProgressColor = computed(() => {
+  const pct = tileProgressPercent.value
+  if (pct >= 100) return '#67C23A'
+  if (pct > 50) return '#409EFF'
+  if (pct > 20) return '#E6A23C'
   return '#F56C6C'
-}
+})
 
 function onConnect() {
   connected.value = true
@@ -282,5 +327,36 @@ onBeforeUnmount(() => {
   border-radius: 3px;
   font-family: 'Courier New', monospace;
   border: 1px solid #d9ecff;
+}
+
+/* 沿途 RSU */
+.rsu-route-list {
+  background: #f5f7fa;
+  border-radius: 6px;
+  padding: 10px;
+}
+.rsu-route-count {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.rsu-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+.rsu-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  font-family: 'Courier New', monospace;
+}
+.rsu-empty-text {
+  color: #c0c4cc;
+  font-size: 12px;
 }
 </style>

@@ -25,7 +25,7 @@ const ROUTE_DEFS = [
   {
     id: 1, name: '古平岗→新庄', start: '古平岗站', end: '新庄站',
     waypoints: [
-      [32.071239453028696, 118.75797707525267],  // 古平岗站
+      [32.07102955609951, 118.7571970943238],  // 古平岗站
       [32.072000000000000, 118.76500000000000],  // 向东
       [32.073000000000000, 118.77500000000000],  // 向东
       [32.074000000000000, 118.78500000000000],  // 向东
@@ -59,7 +59,7 @@ const ROUTE_DEFS = [
   {
     id: 4, name: '古平岗→汉中门', start: '古平岗站', end: '汉中门站',
     waypoints: [
-      [32.071239453028696, 118.75797707525267],  // 古平岗站
+      [32.07102955609951, 118.7571970943238],  // 古平岗站
       [32.066000000000000, 118.76000000000000],  // 虎踞路
       [32.060000000000000, 118.76200000000000],  // 虎踞路
       [32.055000000000000, 118.76400000000000],  // 虎踞路
@@ -226,7 +226,13 @@ export class SimulationService {
 
     // 获取RSU部署数据，用于计算每辆车的内容块
     const deployment = computeRSUDeployment()
-    const routeRsuCounts = deployment.routeRsuCounts || {}
+
+    // 按 routeId 分组 RSU，用于确定每辆车将要途经的 RSU
+    const rsusByRoute = {}
+    for (const rsu of deployment.intersections) {
+      if (!rsusByRoute[rsu.routeId]) rsusByRoute[rsu.routeId] = []
+      rsusByRoute[rsu.routeId].push(rsu)
+    }
 
     let vehicleId = 0
 
@@ -245,7 +251,7 @@ export class SimulationService {
         // 每路线5辆车均匀分布，确保地图上清晰可见5辆车在移动
         const startIdx = Math.floor((i / VEHICLES_PER_ROUTE) * Math.max(path.length - 1, 1))
 
-        const rsuCountForRoute = routeRsuCounts[route.name] || 0
+        const routeRsus = rsusByRoute[route.id] || []
         this.vehicles.push({
           id: vehicleId,
           name: `车辆 ${vehicleId} (${route.name})`,
@@ -260,10 +266,10 @@ export class SimulationService {
           routeId: route.id,
           routeName: route.name,
           routeIndex: i + 1,
-          requestedBlocks: Array.from(
-            { length: rsuCountForRoute * 100 },
-            (_, idx) => idx + 1
+          requestedBlocks: routeRsus.flatMap(rsu =>
+            Array.from({ length: 100 }, (_, i) => (rsu.id - 1) * 100 + i + 1)
           ),
+          routeRsuIds: routeRsus.map(r => r.id),        // 将要途经的 RSU ID 列表
         })
 
         this.vehiclePaths.push(path)
@@ -402,6 +408,8 @@ export class SimulationService {
         routeName: v.routeName,
         routeIndex: v.routeIndex,
         requestedBlocks: v.requestedBlocks,
+        routeRsuIds: v.routeRsuIds || [],               // 完整路由 RSU 序列（长久保存）
+        upcomingRsuIds: this.cachingService?.getUpcomingRsuIds(v.id) || [],  // 实时剩余 RSU（每 tick 更新）
       })),
       timestamp: new Date().toISOString(),
       tick: this.tickCount
@@ -409,9 +417,9 @@ export class SimulationService {
 
     this.io.emit('vehicle:update', payload)
 
-    // 通知 CachingService 更新 RSU 数据和命中率
+    // 通知 CachingService 更新 RSU 数据和命中率（传递 tickCount 用于定时触发 MATLAB）
     if (this.cachingService) {
-      this.cachingService.onVehicleTick(this.vehicles)
+      this.cachingService.onVehicleTick(this.vehicles, this.tickCount)
     }
   }
 

@@ -1,12 +1,5 @@
 {
-  "Prob_Route": [
-    0.7863636363636364,
-    0.9090909090909091,
-    0.95
-  ],
   "algorithmParams": {
-    "E": 3,
-    "X": 150,
     "alpha": 0.8,
     "Capacity_Scale": 1.2,
     "allowed_layers_per_block": [
@@ -31,24 +24,51 @@
         -5,
         5
       ]
-    },
-    "totalRSU": 53,
-    "RSU_per_region": [
-      16,
-      20,
-      17
-    ],
-    "regionLats": [
-      32.072,
-      32.058,
-      32.046
-    ]
+    }
   },
-  "regionCounts": [
-    7,
-    10,
-    11
+  "routes": [
+    {
+      "routeId": 1,
+      "routeName": "古平岗→新庄",
+      "E": 13,
+      "X": 100,
+      "vehicleCount": 1
+    },
+    {
+      "routeId": 2,
+      "routeName": "草场门→九华山",
+      "E": 11,
+      "X": 100,
+      "vehicleCount": 1
+    },
+    {
+      "routeId": 3,
+      "routeName": "汉中门→西安门",
+      "E": 8,
+      "X": 100,
+      "vehicleCount": 1
+    },
+    {
+      "routeId": 4,
+      "routeName": "古平岗→汉中门",
+      "E": 7,
+      "X": 100,
+      "vehicleCount": 1
+    },
+    {
+      "routeId": 5,
+      "routeName": "新模范马路→新街口",
+      "E": 8,
+      "X": 100,
+      "vehicleCount": 1
+    },
+    {
+      "routeId": 6,
+      "routeName": "新庄→西安门",
+      "E": 7,
+      "X": 100,
+      "vehicleCount": 1
+    }
   ],
-  "vehicleCount": 30,
-  "timestamp": "2026-05-31T08:42:30.919Z"
+  "timestamp": "2026-05-31T10:49:04.835Z"
 }

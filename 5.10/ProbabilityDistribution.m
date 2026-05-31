@@ -29,8 +29,9 @@ function [psi] = ProbabilityDistribution(E, X)
         beta = 0.6;  % 降低beta值，使概率更集中在热门瓦片
         psi1_full(i) = 1 / (i^beta);
     end
-    psi1_full = psi1_full / sum(psi1_full);  % 归一化
-    
+    psi1_full = psi1_full / max(psi1_full);  % 用MAX归一化，与后续多跳行保持一致
+    psi1_full = psi1_full * 0.95 + 0.05 / K;  % 增加最小值，避免零概率（同第52行逻辑）
+
     % 确保 psi1_full 长度为 K
     psi1 = psi1_full(1:K);
     psi_rows{1} = psi1;

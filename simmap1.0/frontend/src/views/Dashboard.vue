@@ -23,7 +23,7 @@
 
       <!-- 右侧面板区域 -->
       <div class="side-panel">
-        <ControlPanel />
+        <ControlPanel :rsuData="rsuData" />
         <DataDisplay :rsuData="rsuData" />
       </div>
     </div>
@@ -72,6 +72,8 @@ function onSimulationStatus(data) {
 
 function onRsuUpdate(data) {
   rsuData.value = data
+  // 从 rsu:update 的 vehicleTiles 中合并实时 upcomingRsuIds 到车辆数据
+  vehicleStore.updateVehicleUpcomingRsuIds(data?.vehicleTiles)
 }
 
 onMounted(() => {

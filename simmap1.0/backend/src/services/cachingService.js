@@ -1,13 +1,12 @@
 /**
- * CachingService - RSU 缓存命中率实时计算服务
+ * CachingService - RSU 缓存命中率实时计算服务 (v5.10)
  *
  * 职责:
- * 1. 根据车辆实时位置追踪各 RSU 走廊的车辆分布
- * 2. 计算实时的 Prob_Route（路线概率）
- * 3. 加载 MATLAB 输出的 CacheDecision 和 psi
- * 4. 计算加权缓存命中率
- * 5. 周期性触发 MATLAB 重算
- * 6. 通过 WebSocket 广播 RSU 数据
+ * 1. 按路线（6条）管理 RSU 数据和车辆分布
+ * 2. 每 5 个时间片触发 MATLAB 执行 MWC 算法（每条路线单独计算）
+ * 3. 加载 MATLAB 输出的每路线 CacheDecision（各 RSU 缓存哪些内容块）
+ * 4. 每当车辆进入 RSU 覆盖范围时，对比 RSU 缓存内容与车辆需求计算命中率
+ * 5. 通过 WebSocket 广播 RSU 数据和命中率
  */
 
 import { spawn } from 'child_process'
@@ -21,8 +20,6 @@ const DATA_DIR = path.resolve(__dirname, '../../data')
 
 // 算法参数（与 MATLAB 默认值一致）
 const ALGO_PARAMS = {
-  E: 3,
-  X: 150,
   alpha: 0.8,
   Capacity_Scale: 1.2,
   allowed_layers_per_block: [3, 4, 4],
@@ -34,15 +31,16 @@ const ALGO_PARAMS = {
   },
 }
 
-// 纬度容差（判断车辆是否在某个走廊内）
-// 以区域中心纬度 ±0.01（约 ±1.1km），覆盖各路线的主要行驶范围
-const REGION_TOLERANCE = 0.01
+// 每 RSU 的内容块数（每条路线每个 RSU 管理 X 个内容块）
+const CHUNKS_PER_RSU = 100
 
-// 块（Chunk）模型参数
-const CHUNKS_PER_VEHICLE = 100  // 每辆车请求的数据块数量
-const RSU_PROXIMITY_M = 300     // 车辆-RSU 近距离匹配阈值（米）
+// 车辆-RSU 近距离匹配阈值（米）
+const RSU_PROXIMITY_M = 300
 
-// 6 条车辆路线定义（与 simulationService.js 一致）
+// MATLAB 重算间隔（时间片数）
+const MATLAB_INTERVAL_TICKS = 5
+
+// 6 条车辆路线定义
 const ROUTE_DEFS = [
   { id: 1, name: '古平岗→新庄' },
   { id: 2, name: '草场门→九华山' },
@@ -69,39 +67,58 @@ export class CachingService {
   constructor(io) {
     this.io = io
 
-    // 动态加载 RSU 部署数据
+    // 动态加载 RSU 部署数据（每个 RSU 已有 routeId 字段）
     const deployment = computeRSUDeployment()
     this.rsuPositions = deployment.intersections
-    this.regions = [
-      { id: 1, name: deployment.regionNames[0], latitude: deployment.regionLats[0], rsuCount: deployment.regionCounts[0] },
-      { id: 2, name: deployment.regionNames[1], latitude: deployment.regionLats[1], rsuCount: deployment.regionCounts[1] },
-      { id: 3, name: deployment.regionNames[2], latitude: deployment.regionLats[2], rsuCount: deployment.regionCounts[2] },
-    ]
-    this.totalRSU = deployment.totalRSU
 
-    this.regionCounts = [0, 0, 0]
-    this.probRoute = [1 / 3, 1 / 3, 1 / 3] // 初始均匀分布
-    this.cacheDecision = null                // 450 元素布尔数组
-    this.psi = null                          // 概率分布
-    this.chr = {
-      regions: [0, 0, 0],
-      routeHitRates: new Array(ROUTE_DEFS.length).fill(0),
-      routeVehicleCounts: new Array(ROUTE_DEFS.length).fill(0),
-      routeTotalChunks: new Array(ROUTE_DEFS.length).fill(0),
-      total: 0,
-      algorithmResults: null,
+    // ========== 6 条路线数据模型 ==========
+    // 每条路线维护自己的 RSU 列表和缓存决策
+    this.routeData = {}
+    for (const def of ROUTE_DEFS) {
+      this.routeData[def.id] = {
+        routeId: def.id,
+        name: def.name,
+        rsus: [],           // 该路线的 RSU 列表
+        E: 0,               // RSU 数量
+        X: CHUNKS_PER_RSU,  // 每 RSU 内容块数
+        vehicleCount: 0,    // 当前该路线的车辆数
+        cacheDecision: null, // MWC 输出的布尔数组（长度 = E × X）
+        psi: null,           // 概率分布
+        cachedCount: 0,      // 该路线所有 RSU 缓存的内容块总数
+        maxTiles: 0,         // 该路线总内容块数（E × X）
+        hitRate: 0,          // 该路线命中率
+      }
     }
+
+    // 按 routeId 将 RSU 分配到各路线
+    for (const rsu of this.rsuPositions) {
+      const rd = this.routeData[rsu.routeId]
+      if (rd) {
+        rd.rsus.push(rsu)
+        rd.E++
+        rd.maxTiles = rd.E * rd.X
+      }
+    }
+
+    console.log(`[Caching] 已加载 ${this.rsuPositions.length} 个 RSU，按路线分布:`)
+    for (const rd of Object.values(this.routeData)) {
+      if (rd.E > 0) console.log(`  路线 ${rd.routeId} ${rd.name}: ${rd.E} 个 RSU, ${rd.maxTiles} 个内容块`)
+    }
+
+    // ========== 运行时状态 ==========
+    this.tickCount = 0
+    this.vehicleCount = 0
+    this.totalHitRate = 0
+
+    // 每辆车的 tile 收集状态
+    // vehicleId → { visitedRSUs: Set<rsuIndex>, collectedTiles: Set<tileId>, routeId: number }
+    this.vehicleTileState = new Map()
+
     this.lastMatlabRun = null
     this.matlabRunning = false
     this.matlabError = null
     this.broadcastTimer = null
     this.matlabTimer = null
-    this.vehicleCount = 0
-
-    // 块（Chunk）模型状态
-    this.chunksPerRSU = []                // 每个 RSU 存储的数据块数（系统总块数 = vehicleCount × CHUNKS_PER_VEHICLE）
-    this.rsuChunks = []                   // rsuChunks[i] = Set<tileId> — 每个 RSU 存储的具体瓦片 ID 集合
-    this.vehicleChunkState = new Map()    // vehicleId → { visitedRSUs: Set<index>, collectedTiles: Set<tileId>, totalChunks: number, currentRegion: number, routeId: number }
 
     // 确保 data 目录存在
     if (!fs.existsSync(DATA_DIR)) {
@@ -109,408 +126,229 @@ export class CachingService {
     }
   }
 
+  // ==================== 每 Tick 调用 ====================
+
   /**
    * 每 tick 被 SimulationService 调用
+   * @param {Array} vehicles - 当前所有车辆
+   * @param {number} tickCount - 当前时间片编号
    */
-  onVehicleTick(vehicles) {
+  onVehicleTick(vehicles, tickCount) {
+    this.tickCount = tickCount
     this.vehicleCount = vehicles.length
-    this.updateRegionCounts(vehicles)
-    this.updateProbRoute()
-    this.trackVehicleChunks(vehicles)
+
+    this.updateRouteCounts(vehicles)
+    this.trackVehicleTiles(vehicles)
     this.computeHitRate()
+
+    // 每 MATLAB_INTERVAL_TICKS 个时间片触发一次 MATLAB 重算
+    if (this.tickCount % MATLAB_INTERVAL_TICKS === 0 && this.tickCount > 0) {
+      this.triggerMatlab()
+    }
   }
 
+  // ==================== 车辆统计 ====================
+
   /**
-   * 更新各区域的车辆计数
+   * 统计每条路线上的车辆数（仅统计未完成的车辆）
    */
-  updateRegionCounts(vehicles) {
-    this.regionCounts = [0, 0, 0]
+  updateRouteCounts(vehicles) {
+    // 重置计数
+    for (const rd of Object.values(this.routeData)) {
+      rd.vehicleCount = 0
+    }
+    // 按 routeId 统计
     for (const v of vehicles) {
       if (v.completed) continue
-      for (let r = 0; r < this.regions.length; r++) {
-        if (Math.abs(v.latitude - this.regions[r].latitude) < REGION_TOLERANCE) {
-          this.regionCounts[r]++
-        }
-      }
+      const rd = this.routeData[v.routeId]
+      if (rd) rd.vehicleCount++
     }
   }
 
-  /**
-   * 从车辆计数计算 Prob_Route（与 exportVehicleData.mjs 算法一致）
-   */
-  updateProbRoute() {
-    const maxCount = Math.max(...this.regionCounts, 1)
-    this.probRoute = this.regionCounts.map(c => 0.5 + (c / maxCount) * 0.45)
-  }
+  // ==================== Tile 采集跟踪（命中率核心） ====================
 
   /**
-   * 基于块（Chunk）模型的命中率计算
+   * 跟踪每辆车经过 RSU 时采集的内容块
    *
-   * 每辆车需要收集 CHUNKS_PER_VEHICLE 个数据块，
-   * 命中完成率 = 车辆收集的块数 / CHUNKS_PER_VEHICLE
-   * 路线命中完成率 = 路线所有车辆收集块数之和 / (路线车辆数 × CHUNKS_PER_VEHICLE)
-   */
-  computeHitRate() {
-    if (this.vehicleChunkState.size === 0) {
-      this.chr.regions = [0, 0, 0]
-      this.chr.routeHitRates = new Array(ROUTE_DEFS.length).fill(0)
-      this.chr.routeVehicleCounts = new Array(ROUTE_DEFS.length).fill(0)
-      this.chr.total = 0
-      return
-    }
-
-    const routeChunksSum = new Array(ROUTE_DEFS.length).fill(0)
-    const routeVehicleCount = new Array(ROUTE_DEFS.length).fill(0)
-    let totalChunksSum = 0
-
-    for (const state of this.vehicleChunkState.values()) {
-      totalChunksSum += state.totalChunks
-      if (state.routeId >= 1 && state.routeId <= ROUTE_DEFS.length) {
-        routeChunksSum[state.routeId - 1] += state.totalChunks
-        routeVehicleCount[state.routeId - 1]++
-      }
-    }
-
-    // 总命中率 = 所有车辆收集块数之和 / (车辆数 × CHUNKS_PER_VEHICLE)
-    this.chr.total = totalChunksSum / (this.vehicleChunkState.size * CHUNKS_PER_VEHICLE)
-    // 路线命中率 = 该路线车辆收集块数之和 / (该路线车辆数 × CHUNKS_PER_VEHICLE)
-    this.chr.routeHitRates = routeChunksSum.map((sum, i) =>
-      routeVehicleCount[i] > 0 ? sum / (routeVehicleCount[i] * CHUNKS_PER_VEHICLE) : 0
-    )
-    this.chr.routeVehicleCounts = routeVehicleCount
-    this.chr.routeTotalChunks = routeChunksSum // 各路线总收集块数（用于前端展示命中总数）
-  }
-
-  /**
-   * 将物理 RSU 索引映射到 psi/cacheDecision 数组索引
+   * 核心逻辑：
+   *   车辆进入 RSU 覆盖范围（≤ RSU_PROXIMITY_M）→ 标记该 RSU 已访问
+   *   → 从该 RSU 的缓存决策（MWC 结果）中获取内容块 → 加入车辆的收集集合
    *
-   * 物理 RSU 按区域连续排列（region 1 → region 2 → region 3），
-   * 但 psi 数组中每个区域固定占 X 个位置（X=150）。
-   * 物理 RSU 只占每个区域前 N_r 个位置（N_r = 该区域 RSU 数）。
-   *
-   * 映射: psiIndex = region × X + offsetInRegion
+   * 命中率 = 车辆收集到的内容块数 / 该路线总内容块数
    */
-  rsuIndexToPsiIndex(rsuIdx) {
-    const X = ALGO_PARAMS.X
-    let cumCount = 0
-    for (let r = 0; r < this.regions.length; r++) {
-      const count = this.regions[r].rsuCount
-      if (rsuIdx < cumCount + count) {
-        return r * X + (rsuIdx - cumCount)
-      }
-      cumCount += count
-    }
-    return -1
-  }
-
-  /**
-   * 按 psi 权重从 450 个瓦片中不放回抽样 count 个瓦片 ID
-   * @param {number} count — 需要抽样的瓦片数
-   * @param {number[]} weights — psi 权重数组（长度 450）
-   * @returns {Set<number>} 抽中的瓦片 ID 集合
-   */
-  _weightedSampleTileIds(count, weights) {
-    const result = new Set()
-    if (count <= 0 || !weights || weights.length === 0) return result
-
-    const K = weights.length
-    const totalWeight = weights.reduce((a, b) => a + b, 0)
-    if (totalWeight <= 0) return result
-
-    // 不放回抽样：每次按权重比例随机选取一个，已选中的不再重复
-    const probs = weights.map(w => w / totalWeight)
-    const maxAttempts = count * 10
-    let attempts = 0
-
-    while (result.size < count && attempts < maxAttempts) {
-      const r = Math.random()
-      let cum = 0
-      for (let i = 0; i < K; i++) {
-        cum += probs[i]
-        if (r < cum) {
-          result.add(i)
-          break
-        }
-      }
-      attempts++
-    }
-
-    return result
-  }
-
-  /**
-   * 将 (车辆数 × CHUNKS_PER_VEHICLE) 个数据块按 psi 权重分配到被缓存的 RSU 上
-   * 每辆车沿途从 RSU 下载数据块，系统总块数 = vehicleCount × CHUNKS_PER_VEHICLE
-   * 每次 cacheDecision/psi 更新后调用
-   */
-  computeChunksDistribution() {
-    if (!this.cacheDecision || !this.psi || this.rsuPositions.length === 0) {
-      this.chunksPerRSU = new Array(this.rsuPositions.length).fill(0)
-      return
-    }
-
-    // 系统总数据块数 = 当前车辆数 × 每辆车请求的块数
-    const totalSystemChunks = Math.max(this.vehicleCount, 1) * CHUNKS_PER_VEHICLE
-
-    // 遍历物理 RSU，通过索引映射找到对应的 psi 值
-    const N = this.rsuPositions.length
-    let totalCachedPsi = 0
-    const cachedPsiValues = new Array(N).fill(0)
-
-    for (let i = 0; i < N; i++) {
-      const psiIdx = this.rsuIndexToPsiIndex(i)
-      if (psiIdx >= 0 && this.cacheDecision[psiIdx]) {
-        const p = this.psi[psiIdx] || 0
-        cachedPsiValues[i] = p
-        totalCachedPsi += p
-      }
-    }
-
-    if (totalCachedPsi <= 0) {
-      this.chunksPerRSU = new Array(N).fill(0)
-      console.log('[Caching] 块分布: 无可缓存的 RSU')
-      return
-    }
-
-    // 按 psi 权重分配（向下取整）
-    const chunks = new Array(N).fill(0)
-    for (let i = 0; i < N; i++) {
-      if (cachedPsiValues[i] > 0) {
-        chunks[i] = Math.floor(totalSystemChunks * cachedPsiValues[i] / totalCachedPsi)
-      }
-    }
-
-    // 将剩余块分配给小数部分最大的 RSU
-    let remaining = totalSystemChunks - chunks.reduce((a, b) => a + b, 0)
-    if (remaining > 0) {
-      const remainders = []
-      for (let i = 0; i < N; i++) {
-        if (cachedPsiValues[i] > 0) {
-          const exact = totalSystemChunks * cachedPsiValues[i] / totalCachedPsi
-          remainders.push({ idx: i, rem: exact - Math.floor(exact) })
-        }
-      }
-      remainders.sort((a, b) => b.rem - a.rem)
-
-      for (let i = 0; i < Math.min(remaining, remainders.length); i++) {
-        chunks[remainders[i].idx]++
-      }
-    }
-
-    this.chunksPerRSU = chunks
-    const assigned = chunks.reduce((a, b) => a + b, 0)
-    const activeRSUs = chunks.filter(c => c > 0).length
-
-    // 为每个 RSU 分配具体的瓦片 ID（按 psi 权重抽样）
-    this.rsuChunks = new Array(N).fill(null).map(() => new Set())
-    for (let i = 0; i < N; i++) {
-      if (chunks[i] > 0 && cachedPsiValues[i] > 0) {
-        const tiles = this._weightedSampleTileIds(chunks[i], this.psi)
-        this.rsuChunks[i] = tiles
-      }
-    }
-
-    console.log(`[Caching] 块分布完成: ${assigned} 个块分配到 ${activeRSUs} 个 RSU (${this.vehicleCount}辆车 × ${CHUNKS_PER_VEHICLE}块/车)`)
-  }
-
-  /**
-   * 查找车辆附近的 RSU 索引
-   * @returns {number} RSU 索引（无匹配返回 -1）
-   */
-  findNearbyRSU(lat, lng) {
-    let closestIdx = -1
-    let closestDist = RSU_PROXIMITY_M
-
-    for (let i = 0; i < this.rsuPositions.length; i++) {
-      const rsu = this.rsuPositions[i]
-      const dist = haversineDist(lat, lng, rsu.latitude, rsu.longitude)
-      if (dist < closestDist) {
-        closestDist = dist
-        closestIdx = i
-      }
-    }
-
-    return closestIdx
-  }
-
-  /**
-   * 追踪每辆车的 RSU 访问和块收集情况
-   */
-  trackVehicleChunks(vehicles) {
+  trackVehicleTiles(vehicles) {
     // 为新车辆初始化状态
     for (const v of vehicles) {
-      if (!v.completed && !this.vehicleChunkState.has(v.id)) {
-        this.vehicleChunkState.set(v.id, {
+      if (!v.completed && !this.vehicleTileState.has(v.id)) {
+        const rd = this.routeData[v.routeId]
+        if (!rd) continue
+        this.vehicleTileState.set(v.id, {
           visitedRSUs: new Set(),
           collectedTiles: new Set(),
-          totalChunks: 0,
-          currentRegion: -1,
-          routeId: v.routeId || -1,
+          routeId: v.routeId,
+          requestedBlocks: new Set(v.requestedBlocks || []),
         })
       }
     }
 
-    // 检查每辆车的 RSU 访问
+    // 检查每辆车是否经过新的 RSU
     for (const v of vehicles) {
       if (v.completed) continue
-      const state = this.vehicleChunkState.get(v.id)
+      const state = this.vehicleTileState.get(v.id)
       if (!state) continue
 
-      // 更新当前所在区域
-      for (let r = 0; r < this.regions.length; r++) {
-        if (Math.abs(v.latitude - this.regions[r].latitude) < REGION_TOLERANCE) {
-          state.currentRegion = r
-          break
-        }
-      }
+      const rd = this.routeData[state.routeId]
+      if (!rd || rd.rsus.length === 0 || !rd.cacheDecision) continue
 
-      // 检查是否经过新的 RSU
-      const rsuIdx = this.findNearbyRSU(v.latitude, v.longitude)
-      if (rsuIdx !== -1 && this.chunksPerRSU[rsuIdx] > 0 && !state.visitedRSUs.has(rsuIdx)) {
-        state.visitedRSUs.add(rsuIdx)
+      // 遍历该路线的所有 RSU，检查车辆是否进入覆盖范围
+      for (let rsuIdx = 0; rsuIdx < rd.rsus.length; rsuIdx++) {
+        if (state.visitedRSUs.has(rsuIdx)) continue
 
-        // 收集该 RSU 存储的具体瓦片 ID（去重）
-        const tiles = this.rsuChunks[rsuIdx]
-        if (tiles) {
-          for (const tileId of tiles) {
-            state.collectedTiles.add(tileId)
+        const rsu = rd.rsus[rsuIdx]
+        const dist = haversineDist(v.latitude, v.longitude, rsu.latitude, rsu.longitude)
+
+        if (dist < RSU_PROXIMITY_M) {
+          state.visitedRSUs.add(rsuIdx)
+
+          // 命中块 = 车辆申请的内容块 ∩ RSU缓存的内容块
+          // 块号按 RSU 全局标号计算: (rsu.id - 1) * X + offset + 1
+          const cacheDec = rd.cacheDecision
+          const X = rd.X
+          const startIdx = rsuIdx * X
+          const endIdx = Math.min(startIdx + X, cacheDec.length)
+
+          for (let offset = 0; offset < endIdx - startIdx; offset++) {
+            const cacheIdx = startIdx + offset
+            if (cacheDec[cacheIdx]) {
+              const blockNumber = (rsu.id - 1) * X + offset + 1
+              if (state.requestedBlocks.has(blockNumber)) {
+                state.collectedTiles.add(blockNumber)
+              }
+            }
           }
         }
-        state.totalChunks = Math.min(CHUNKS_PER_VEHICLE, state.collectedTiles.size)
       }
     }
 
-    // 清理已从数组中移除的车辆（保留已完成的车辆，其缓存数据继续参与统计）
+    // 清理已移除的车辆
     const activeIds = new Set(vehicles.map(v => v.id))
-    for (const id of this.vehicleChunkState.keys()) {
+    for (const id of this.vehicleTileState.keys()) {
       if (!activeIds.has(id)) {
-        this.vehicleChunkState.delete(id)
+        this.vehicleTileState.delete(id)
       }
     }
   }
 
   /**
-   * 在 MATLAB 重算后，根据新的 chunksPerRSU 重新计算各车的块数
-   * （保留 visitedRSUs 避免归零）
+   * 在 MATLAB 重算后，根据新的 cacheDecision 重新计算各车的采集块
+   * （保留 visitedRSUs 避免车辆重复访问，只更新块内容）
    */
-  recalculateVehicleChunks() {
-    for (const state of this.vehicleChunkState.values()) {
+  recalculateVehicleTiles() {
+    for (const state of this.vehicleTileState.values()) {
       state.collectedTiles.clear()
+      const rd = this.routeData[state.routeId]
+      if (!rd || !rd.cacheDecision) continue
+
+      const X = rd.X
       for (const rsuIdx of state.visitedRSUs) {
-        const tiles = this.rsuChunks[rsuIdx]
-        if (tiles) {
-          for (const tileId of tiles) {
-            state.collectedTiles.add(tileId)
+        const rsu = rd.rsus[rsuIdx]
+        if (!rsu) continue
+        const startIdx = rsuIdx * X
+        const endIdx = Math.min(startIdx + X, rd.cacheDecision.length)
+        for (let offset = 0; offset < endIdx - startIdx; offset++) {
+          const cacheIdx = startIdx + offset
+          // 块号按 RSU 全局标号计算: (rsu.id - 1) * X + offset + 1
+          if (rd.cacheDecision[cacheIdx]) {
+            const blockNumber = (rsu.id - 1) * X + offset + 1
+            if (state.requestedBlocks.has(blockNumber)) {
+              state.collectedTiles.add(blockNumber)
+            }
           }
         }
       }
-      state.totalChunks = Math.min(CHUNKS_PER_VEHICLE, state.collectedTiles.size)
     }
-    console.log(`[Caching] 已重新计算 ${this.vehicleChunkState.size} 辆车的块总数`)
+    console.log(`[Caching] 已重新计算 ${this.vehicleTileState.size} 辆车的命中块状态`)
   }
 
+  // ==================== 命中率计算 ====================
+
   /**
-   * 确保每个区域至少有一个 RSU 被缓存
-   * 避免 MATLAB 算法将某个区域完全排除导致该区域路线命中率始终为 0
+   * 计算每条路线的缓存命中率
+   *
+   * 路线命中率 = 该路线所有车辆命中的内容块总数 / (该路线车辆数 × 路线总内容块数)
+   * 其中"命中的内容块" = 车辆申请的 ∩ RSU缓存的（即车辆经过RSU时，其需要的内容块正好被RSU缓存）
+   * 系统总命中率 = 所有路线命中率的车辆数加权平均
    */
-  _ensureMinCachePerRegion() {
-    if (!this.cacheDecision || !this.psi) return
-    const X = ALGO_PARAMS.X
-    let patched = false
+  computeHitRate() {
+    let totalWeighted = 0
+    let totalVehicles = 0
 
-    for (let r = 0; r < this.regions.length; r++) {
-      const regionCount = this.regions[r].rsuCount
-      const psiStart = r * X
-
-      // 检查该区域是否有被缓存的 RSU
-      let hasCached = false
-      for (let j = 0; j < regionCount; j++) {
-        if (this.cacheDecision[psiStart + j]) {
-          hasCached = true
-          break
-        }
+    for (const rd of Object.values(this.routeData)) {
+      if (rd.E === 0) {
+        rd.hitRate = 0
+        continue
       }
 
-      // 如果没有，启用该区域 psi 值最大的 RSU
-      if (!hasCached && regionCount > 0) {
-        let bestIdx = psiStart
-        let bestPsi = this.psi[psiStart] || 0
-        for (let j = 1; j < regionCount; j++) {
-          const p = this.psi[psiStart + j] || 0
-          if (p > bestPsi) {
-            bestPsi = p
-            bestIdx = psiStart + j
-          }
-        }
-        this.cacheDecision[bestIdx] = true
-        patched = true
-        console.log(`[Caching] 区域 ${r + 1} (${this.regions[r].name}) 无缓存 RSU，已启用索引 ${bestIdx} (psi=${bestPsi.toFixed(4)})`)
+      const totalTilesPerVehicle = rd.E * rd.X
+      if (totalTilesPerVehicle === 0) {
+        rd.hitRate = 0
+        continue
       }
+
+      let routeCollectedSum = 0
+      let vehicleCountOnRoute = 0
+
+      for (const state of this.vehicleTileState.values()) {
+        if (state.routeId !== rd.routeId) continue
+        routeCollectedSum += state.collectedTiles.size
+        vehicleCountOnRoute++
+      }
+
+      rd.hitRate = vehicleCountOnRoute > 0
+        ? routeCollectedSum / (vehicleCountOnRoute * totalTilesPerVehicle)
+        : 0
+
+      totalWeighted += rd.hitRate * vehicleCountOnRoute
+      totalVehicles += vehicleCountOnRoute
     }
 
-    if (patched) {
-      console.log('[Caching] 已补充区域内最少缓存 RSU，确保所有路线均有缓存数据')
-    }
+    // 总命中率 = 加权平均
+    this.totalHitRate = totalVehicles > 0 ? totalWeighted / totalVehicles : 0
   }
 
+  // ==================== MATLAB 触发 ====================
+
   /**
-   * 从 MATLAB 输出的 cache_decision.json 加载结果
+   * 构建 MATLAB 输入数据（每条路线独立参数）
    */
-  loadResults() {
-    const filePath = path.join(DATA_DIR, 'cache_decision.json')
-    try {
-      if (!fs.existsSync(filePath)) {
-        console.log('[Caching] cache_decision.json 不存在，跳过加载')
-        return false
-      }
-      const raw = fs.readFileSync(filePath, 'utf-8')
-      const data = JSON.parse(raw)
-
-      // 转换 CacheDecision 为布尔数组
-      if (data.CacheDecision && Array.isArray(data.CacheDecision)) {
-        this.cacheDecision = data.CacheDecision.map(v => v === 1)
-      }
-      if (data.psi && Array.isArray(data.psi)) {
-        this.psi = data.psi
-      }
-
-      // 确保每个区域至少有一个 RSU 被缓存，避免整条路线命中率为 0
-      this._ensureMinCachePerRegion()
-
-      // 基于新 cacheDecision/psi 重新计算块分布
-      this.computeChunksDistribution()
-      this.recalculateVehicleChunks()
-
-      // 对比算法结果（来自 MATLAB 的概率公式计算，仅供参考）
-      if (data.Algorithm_Comparison) {
-        this.chr.algorithmResults = data.Algorithm_Comparison
-      }
-
-      // 注意: 不再使用 MATLAB 的 CHR_RSU / CHR_Total,
-      //       改用 JS 端基于块（Chunk）模型的实时计算
-
-      this.lastMatlabRun = data.timestamp || new Date().toISOString()
-      this.matlabError = null
-      console.log(`[Caching] 已加载 MATLAB 结果，总命中率: ${this.chr.total.toFixed(4)}`)
-      return true
-    } catch (err) {
-      console.error(`[Caching] 加载结果失败: ${err.message}`)
-      return false
+  buildMatlabInput() {
+    return {
+      algorithmParams: { ...ALGO_PARAMS },
+      routes: Object.values(this.routeData)
+        .filter(r => r.E > 0)
+        .map(r => ({
+          routeId: r.routeId,
+          routeName: r.name,
+          E: r.E,
+          X: r.X,
+          vehicleCount: r.vehicleCount,
+        })),
+      timestamp: new Date().toISOString(),
     }
   }
 
   /**
-   * 导出车辆数据并触发 MATLAB 重算
+   * 触发 MATLAB 重算
    */
   async triggerMatlab() {
     if (this.matlabRunning) {
-      console.log('[Caching] MATLAB 正在运行中，跳过本次触发')
+      console.log(`[Caching] MATLAB 正在运行中，跳过本次触发 (tick=${this.tickCount})`)
       return
     }
 
     this.matlabRunning = true
     this.matlabError = null
-    console.log('[Caching] 触发 MATLAB 重算...')
+    console.log(`[Caching] 触发 MATLAB 重算 (tick=${this.tickCount})...`)
 
     try {
       // 1. 写入输入 JSON
@@ -518,12 +356,24 @@ export class CachingService {
       const inputPath = path.join(DATA_DIR, '_vehicle_input.json')
       fs.writeFileSync(inputPath, JSON.stringify(input, null, 2), 'utf-8')
 
-      // 2. 启动 MATLAB
+      // 2. 记录各路线输入的 E 和 X（用于后续验证）
+      const routeParams = {}
+      for (const r of input.routes) {
+        routeParams[r.routeId] = { E: r.E, X: r.X }
+      }
+      this._lastInputRouteParams = routeParams
+
+      // 3. 启动 MATLAB
       const result = await this.runMatlabProcess()
 
       if (result.success) {
-        // 3. 加载结果
-        this.loadResults()
+        // 4. 加载结果
+        const loaded = this.loadResults()
+        if (loaded) {
+          // 5. 使用新缓存决策重新计算所有车辆的采集状态
+          this.recalculateVehicleTiles()
+          this.computeHitRate()
+        }
       } else {
         this.matlabError = result.error
         console.error(`[Caching] MATLAB 运行失败: ${result.error}`)
@@ -533,24 +383,6 @@ export class CachingService {
       console.error(`[Caching] MATLAB 异常: ${err.message}`)
     } finally {
       this.matlabRunning = false
-    }
-  }
-
-  /**
-   * 构建 MATLAB 输入数据
-   */
-  buildMatlabInput() {
-    return {
-      Prob_Route: this.probRoute,
-      algorithmParams: {
-        ...ALGO_PARAMS,
-        totalRSU: this.totalRSU,
-        RSU_per_region: this.regions.map(r => r.rsuCount),
-        regionLats: this.regions.map(r => r.latitude),
-      },
-      regionCounts: this.regionCounts,
-      vehicleCount: this.vehicleCount,
-      timestamp: new Date().toISOString(),
     }
   }
 
@@ -567,10 +399,10 @@ export class CachingService {
       const child = spawn('matlab', [
         '-batch',
         scriptName,
-        '-sd', matlabDir,  // 设置工作目录
+        '-sd', matlabDir,
       ], {
         cwd: matlabDir,
-        timeout: 120000, // 2 分钟超时
+        timeout: 120000,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
@@ -587,10 +419,10 @@ export class CachingService {
 
       child.on('close', (code) => {
         if (code === 0) {
-          // 查找输出中的关键行
-          const hitRateMatch = stdout.match(/MWC 总命中率: ([\d.]+)/)
-          if (hitRateMatch) {
-            console.log(`[Caching] MATLAB 完成，MWC 命中率: ${hitRateMatch[1]}`)
+          // 输出各路线结果摘要
+          const routeMatches = stdout.matchAll(/路线 (\d+) \(.*?\): E=(\d+), X=(\d+), 缓存=(\d+)\/(\d+)/g)
+          for (const m of routeMatches) {
+            console.log(`[Caching] 路线 ${m[1]}: ${m[4]}/${m[5]} 块缓存`)
           }
           resolve({ success: true, stdout, stderr })
         } else {
@@ -607,55 +439,172 @@ export class CachingService {
     })
   }
 
+  // ==================== 加载 MATLAB 结果 ====================
+
+  /**
+   * 从 MATLAB 输出的 cache_decision.json 加载每路线的缓存决策
+   */
+  loadResults() {
+    const filePath = path.join(DATA_DIR, 'cache_decision.json')
+    try {
+      if (!fs.existsSync(filePath)) {
+        console.log('[Caching] cache_decision.json 不存在，跳过加载')
+        return false
+      }
+      const raw = fs.readFileSync(filePath, 'utf-8')
+      const data = JSON.parse(raw)
+
+      if (!data.routes || !Array.isArray(data.routes)) {
+        console.log('[Caching] cache_decision.json 无 routes 字段')
+        return false
+      }
+
+      let loadedCount = 0
+      for (const routeResult of data.routes) {
+        const rd = this.routeData[routeResult.routeId]
+        if (!rd) {
+          console.warn(`[Caching] 未知路线 ID: ${routeResult.routeId}`)
+          continue
+        }
+
+        // 将 CacheDecision 转为布尔数组
+        if (routeResult.CacheDecision && Array.isArray(routeResult.CacheDecision)) {
+          rd.cacheDecision = routeResult.CacheDecision.map(v => v === 1)
+        }
+        if (routeResult.psi && Array.isArray(routeResult.psi)) {
+          rd.psi = routeResult.psi
+        }
+
+        rd.cachedCount = routeResult.Total_Cached_Tiles || 0
+        rd.maxTiles = (routeResult.E || rd.E) * (routeResult.X || rd.X)
+
+        loadedCount++
+        console.log(`[Caching] 路线 ${rd.routeId} (${rd.name}): ${rd.cachedCount}/${rd.maxTiles} 块缓存, ${rd.E} 个 RSU`)
+      }
+
+      this.lastMatlabRun = data.timestamp || new Date().toISOString()
+      this.matlabError = null
+      console.log(`[Caching] 已加载 ${loadedCount} 条路线的 MATLAB 结果`)
+      return loadedCount > 0
+    } catch (err) {
+      console.error(`[Caching] 加载结果失败: ${err.message}`)
+      return false
+    }
+  }
+
+  /**
+   * 获取指定车辆尚未途经的 RSU ID 列表（供 simulationService 的 vehicle:update 使用）
+   * @param {number} vehicleId
+   * @returns {number[]}
+   */
+  getUpcomingRsuIds(vehicleId) {
+    const state = this.vehicleTileState.get(vehicleId)
+    if (!state) return []
+    const rd = this.routeData[state.routeId]
+    if (!rd) return []
+    return rd.rsus
+      .map((rsu, idx) => ({ id: rsu.id, idx }))
+      .filter(({ idx }) => !state.visitedRSUs.has(idx))
+      .map(({ id }) => id)
+  }
+
+  // ==================== WebSocket 广播 ====================
+
+  /**
+   * 获取各车辆命中的内容块信息（供 DataDisplay 使用）
+   */
+  _getVehicleTiles() {
+    const result = {}
+    for (const [vid, state] of this.vehicleTileState) {
+      // 车辆尚未途经的 RSU ID 列表
+      const rd = this.routeData[state.routeId]
+      let upcomingRsuIds = []
+      if (rd) {
+        upcomingRsuIds = rd.rsus
+          .map((rsu, idx) => ({ id: rsu.id, idx }))
+          .filter(({ idx }) => !state.visitedRSUs.has(idx))
+          .map(({ id }) => id)
+      }
+
+      result[vid] = {
+        collectedCount: state.collectedTiles.size,
+        tileIds: Array.from(state.collectedTiles),
+        upcomingRsuIds,
+      }
+    }
+    return result
+  }
+
   /**
    * 获取当前 RSU 数据（供 WebSocket 广播和 API 使用）
    */
   getCurrentData() {
-    // 收集每辆车的瓦片收集信息
-    const vehicleTiles = {}
-    for (const [vid, state] of this.vehicleChunkState) {
-      vehicleTiles[vid] = {
-        collectedCount: state.totalChunks,
-        tileIds: Array.from(state.collectedTiles),
-      }
-    }
-
+    const routeData = Object.values(this.routeData)
+      .filter(r => r.E > 0)
+      .map(r => ({
+        id: r.routeId,
+        name: r.name,
+        hitRate: r.hitRate,
+        vehicleCount: r.vehicleCount,
+        collectedTiles: this._getRouteCollectedCount(r.routeId),
+        E: r.E,
+        X: r.X,
+      }))
+    // 调试：打印广播的路线数据
+    console.log(`[Caching] 广播 ${routeData.length} 条路线:`, routeData.map(r => `${r.name}: ${r.E}个RSU, ${r.vehicleCount}辆车, ${r.collectedTiles}命中块`).join(' | '))
     return {
-      rsus: this.rsuPositions.map(rsu => ({
-        ...rsu,
-        hitRate: this.chr.regions[rsu.region - 1] || 0,
-      })),
-      regions: this.regions.map((r, i) => ({
-        id: r.id,
-        name: r.name,
-        latitude: r.latitude,
-        hitRate: this.chr.regions[i] || 0,
-        probRoute: this.probRoute[i],
-        vehicleCount: this.regionCounts[i],
-      })),
-      routes: ROUTE_DEFS.map((r, i) => ({
-        id: r.id,
-        name: r.name,
-        hitRate: this.chr.routeHitRates?.[i] || 0,
-        vehicleCount: this.chr.routeVehicleCounts?.[i] || 0,
-        totalChunks: this.chr.routeTotalChunks?.[i] || 0,
-      })),
-      totalHitRate: this.chr.total,
-      algorithmResults: this.chr.algorithmResults,
+      rsus: this.rsuPositions.map(rsu => {
+        // 查找该 RSU 在其路线中的索引
+        const rd = this.routeData[rsu.routeId]
+        let cachedTiles = []
+        if (rd?.cacheDecision && rd.E > 0) {
+          const rsuIndex = rd.rsus.indexOf(rsu)
+          if (rsuIndex >= 0) {
+            const X = rd.X
+            const startIdx = rsuIndex * X
+            const endIdx = Math.min(startIdx + X, rd.cacheDecision.length)
+            for (let offset = 0; offset < endIdx - startIdx; offset++) {
+              if (rd.cacheDecision[startIdx + offset]) {
+                cachedTiles.push((rsu.id - 1) * X + offset + 1)
+              }
+            }
+          }
+        }
+        return {
+          ...rsu,
+          cachedTiles,         // 该 RSU 缓存的内容块 ID 列表（来自 MWC 决策）
+          cacheEnabled: cachedTiles.length > 0,
+        }
+      }),
+      // 各车辆采集的内容块信息（供前端 DataDisplay 选中车辆详情使用）
+      vehicleTiles: this._getVehicleTiles(),
+      routes: routeData,
+      totalHitRate: this.totalHitRate,
       matlabRunning: this.matlabRunning,
       matlabError: this.matlabError,
       lastMatlabRun: this.lastMatlabRun,
-      // 瓦片（Tile）模型数据
-      rsuChunks: this.rsuChunks.map(s => Array.from(s)),   // 各 RSU 存储的瓦片 ID 列表
-      vehicleTiles,                                         // 各车辆收集的瓦片信息
-      tileStats: {
-        totalTiles: this.psi ? this.psi.length : 0,        // 系统总瓦片数（450）
-        totalCopies: this.chunksPerRSU.reduce((a, b) => a + b, 0),  // 已分配副本数
-        activeRSUs: this.chunksPerRSU.filter(c => c > 0).length,    // 活跃 RSU 数
-      },
+      tick: this.tickCount,
       timestamp: new Date().toISOString(),
     }
   }
+
+  /**
+   * 获取某路线车辆已命中的内容块总数（去重后）
+   * 命中 = 车辆申请的内容块恰好被 RSU 缓存
+   */
+  _getRouteCollectedCount(routeId) {
+    const seenTiles = new Set()
+    for (const state of this.vehicleTileState.values()) {
+      if (state.routeId === routeId) {
+        for (const tileId of state.collectedTiles) {
+          seenTiles.add(tileId)
+        }
+      }
+    }
+    return seenTiles.size
+  }
+
+  // ==================== 生命周期管理 ====================
 
   /**
    * 启动周期性广播（每 5 秒）
@@ -673,12 +622,10 @@ export class CachingService {
   }
 
   /**
-   * 启动周期性 MATLAB 重算（每 60 秒）
+   * 启动 MATLAB 周期（首次加载/触发）
+   * 后续由 onVehicleTick 的每 5 tick 自动触发
    */
-  startMatlabLoop(intervalMs = 60000) {
-    if (this.matlabTimer) return
-    console.log(`[Caching] 启动 MATLAB 周期重算 (每 ${intervalMs}ms)`)
-
+  startMatlabLoop() {
     // 尝试立即加载已有结果
     const loaded = this.loadResults()
 
@@ -686,18 +633,20 @@ export class CachingService {
     if (!loaded) {
       this.triggerMatlab()
     }
-
-    this.matlabTimer = setInterval(() => {
-      this.triggerMatlab()
-    }, intervalMs)
   }
 
   /**
-   * 重置块收集状态（模拟重置时调用）
+   * 重置（模拟重置时调用）
    */
   reset() {
-    this.vehicleChunkState.clear()
-    this.rsuChunks = []
+    this.vehicleTileState.clear()
+    this.tickCount = 0
+    this.totalHitRate = 0
+    for (const rd of Object.values(this.routeData)) {
+      rd.vehicleCount = 0
+      rd.hitRate = 0
+    }
+    console.log('[Caching] 已重置')
   }
 
   /**
@@ -707,10 +656,6 @@ export class CachingService {
     if (this.broadcastTimer) {
       clearInterval(this.broadcastTimer)
       this.broadcastTimer = null
-    }
-    if (this.matlabTimer) {
-      clearInterval(this.matlabTimer)
-      this.matlabTimer = null
     }
     console.log('[Caching] 已停止')
   }

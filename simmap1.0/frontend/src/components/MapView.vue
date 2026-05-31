@@ -17,6 +17,19 @@ const props = defineProps({
 const vehicleStore = useVehicleStore()
 const mapContainer = ref(null)
 
+// RSU ID → routeId 查找表（从 rsuData 构建），用于给RSU标签着色
+const rsuRouteMap = ref(new Map())
+
+watch(() => props.rsuData?.rsus, (rsus) => {
+  const map = new Map()
+  if (rsus) {
+    for (const rsu of rsus) {
+      map.set(rsu.id, rsu.routeId)
+    }
+  }
+  rsuRouteMap.value = map
+}, { immediate: true })
+
 let map = null
 let vehicleMarkers = {}
 let trajectoryLines = {}
@@ -100,12 +113,12 @@ function initRsuMarkers() {
   const rsuList = props.rsuData?.rsus || []
   if (rsuList.length === 0) return
 
-  rsuList.forEach((rsu, idx) => {
+  rsuList.forEach((rsu) => {
     const routeColor = ROUTE_COLORS[rsu.routeId]
     const color = routeColor ? routeColor.body : '#909399'
     const routeName = ROUTE_NAMES[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
     const latlng = [rsu.latitude, rsu.longitude]
-    const tileCount = props.rsuData?.rsuChunks?.[idx]?.length || 0
+    const tileCount = rsu.cachedTiles?.length || 0
 
     // RSU 位置标记
     const marker = L.circleMarker(latlng, {
@@ -125,18 +138,29 @@ function initRsuMarkers() {
       fillOpacity: 0.08,
       weight: 1,
       opacity: 0.3,
+      interactive: false,  // 不拦截点击事件，让 RSU 标记接收点击
       className: 'rsu-coverage-circle',
     }).addTo(map)
 
     marker.bindPopup(`
-      <div style="font-size:13px;">
-        <b>RSU #${rsu.id}</b><br/>
-        位置: ${rsu.name}<br/>
-        所属路线: <span style="color:${color};font-weight:bold;">${routeName}</span><br/>
-        区域: ${rsu.region}<br/>
-        覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
-        <span id="rsu-hitrate-${rsu.id}" style="color:#409EFF;font-weight:bold;">命中率: 计算中...</span><br/>
-        缓存瓦片: ${tileCount} 个
+      <div style="font-size:13px; max-width:280px;">
+        <b style="font-size:15px;">RSU #${rsu.id}</b><br/>
+        <span style="color:#909399;font-size:12px;">${rsu.name}</span><br/>
+        <div style="margin-top:6px;">
+          所属路线: <span style="color:${color};font-weight:bold;">${routeName}</span>
+        </div>
+        <div style="margin-top:7px;border-top:1px solid #ebeef5;padding-top:6px;">
+          <div style="display:flex;justify-content:space-between;">
+            <span style="color:#606266;">缓存瓦片</span>
+            <span style="font-weight:bold;color:#409EFF;">${tileCount} 个</span>
+          </div>
+          <div style="margin-top:6px;max-height:120px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:3px;">
+            ${rsu.cachedTiles?.length > 0
+              ? rsu.cachedTiles.map(id => `<span style="font-size:10px;padding:1px 5px;background:#ecf5ff;color:#409EFF;border-radius:3px;border:1px solid #d9ecff;">${id}</span>`).join('')
+              : '<span style="color:#c0c4cc;font-size:12px;">暂无缓存</span>'
+            }
+          </div>
+        </div>
       </div>
     `)
 
@@ -155,7 +179,7 @@ function updateRsuMarkers(rsuData) {
     const marker = rsuMarkers[rsu.id]
     if (!marker) continue
     const hitRate = (rsu.hitRate * 100).toFixed(1)
-    const tileCount = rsuData.rsuChunks?.[idx]?.length || 0
+    const tileCount = rsu.cachedTiles?.length || 0
     const routeColor = ROUTE_COLORS[rsu.routeId]
     const color = routeColor ? routeColor.body : '#909399'
     const routeName = ROUTE_NAMES[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
@@ -163,14 +187,27 @@ function updateRsuMarkers(rsuData) {
     marker.setStyle({ fillOpacity: 0.3 + hitRate / 100 * 0.7 })
     // 更新 popup 内容
     marker.setPopupContent(`
-      <div style="font-size:13px;">
-        <b>RSU #${rsu.id}</b><br/>
-        位置: ${rsu.name}<br/>
-        所属路线: <span style="color:${color};font-weight:bold;">${routeName}</span><br/>
-        区域: ${rsu.region}<br/>
-        覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
-        <span style="color:#409EFF;font-weight:bold;">命中率: ${hitRate}%</span><br/>
-        缓存瓦片: ${tileCount} 个
+      <div style="font-size:13px; max-width:280px;">
+        <b style="font-size:15px;">RSU #${rsu.id}</b><br/>
+        <span style="color:#909399;font-size:12px;">${rsu.name}</span><br/>
+        <div style="margin-top:6px;">
+          所属路线: <span style="color:${color};font-weight:bold;">${routeName}</span>
+        </div>
+        <div style="margin-top:4px;">
+          命中率: <span style="color:#409EFF;font-weight:bold;">${hitRate}%</span>
+        </div>
+        <div style="margin-top:7px;border-top:1px solid #ebeef5;padding-top:6px;">
+          <div style="display:flex;justify-content:space-between;">
+            <span style="color:#606266;">缓存瓦片</span>
+            <span style="font-weight:bold;color:#409EFF;">${tileCount} 个</span>
+          </div>
+          <div style="margin-top:6px;max-height:120px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:3px;">
+            ${rsu.cachedTiles?.length > 0
+              ? rsu.cachedTiles.map(id => `<span style="font-size:10px;padding:1px 5px;background:#ecf5ff;color:#409EFF;border-radius:3px;border:1px solid #d9ecff;">${id}</span>`).join('')
+              : '<span style="color:#c0c4cc;font-size:12px;">暂无缓存</span>'
+            }
+          </div>
+        </div>
       </div>
     `)
   }
@@ -213,7 +250,6 @@ function updateVehicleMarkers(vehicles) {
   vehicles.forEach(v => {
     const id = v.id
     const routeId = v.routeId || 1
-    const routeName = v.routeName || ''
     const latlng = [v.latitude, v.longitude]
 
     if (vehicleMarkers[id]) {
@@ -227,14 +263,33 @@ function updateVehicleMarkers(vehicles) {
         icon: createCarIcon(v.heading || 0, routeId)
       })
         .addTo(map)
-        .bindPopup(`
-          <div style="font-size:13px;">
-            <b>车辆 #${id}</b><br/>
-            路线: ${routeName}<br/>
-            速度: ${(v.speed || 0).toFixed(1)} km/h<br/>
-            位置: ${v.latitude.toFixed(6)}, ${v.longitude.toFixed(6)}
-          </div>
-        `)
+        .bindPopup(() => {
+            // 从 store 实时查找最新车辆数据，避免闭包捕获旧引用
+            const live = vehicleStore.vehicles.find(ve => ve.id === id) || v
+            const upcomingIds = live.upcomingRsuIds || []
+            const popupEl = document.createElement('div')
+            popupEl.style.cssText = 'font-size:13px;max-width:300px;'
+            popupEl.innerHTML = `
+              <b style="font-size:15px;">车辆 #${live.id}</b>
+              <div style="color:#909399;font-size:12px;margin:2px 0 6px;">${live.routeName}</div>
+              <div style="margin-top:6px;border-top:1px solid #ebeef5;padding-top:6px;">
+                <div style="font-weight:500;color:#606266;font-size:12px;margin-bottom:4px;">
+                  将要途经的 RSU（${upcomingIds.length || 0} 个）：
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px;max-height:100px;overflow-y:auto;">
+                  ${upcomingIds.length > 0
+                    ? upcomingIds.map(ruid => {
+                        const rRouteId = rsuRouteMap.value.get(ruid) || live.routeId
+                        const c = ROUTE_COLORS[rRouteId]?.body || '#409EFF'
+                        return `<span style="font-size:10px;padding:2px 6px;background:${c}22;color:${c};border-radius:3px;border:1px solid ${c};white-space:nowrap;">RSU #${ruid}</span>`
+                      }).join('')
+                    : '<span style="color:#c0c4cc;">暂无数据</span>'
+                  }
+                </div>
+              </div>
+            `
+            return popupEl
+          })
 
       marker.on('click', () => {
         vehicleStore.setSelectedVehicle(id)

@@ -64,22 +64,56 @@
         :class="{ active: selectedVehicleId === v.id }"
         @click="selectVehicle(v.id)"
       >
-        <span class="vehicle-id">车辆 #{{ v.id }}</span>
-        <span class="vehicle-speed">{{ (v.speed || 0).toFixed(1) }} km/h</span>
+        <div class="vehicle-item-row">
+          <span class="vehicle-id">车辆 #{{ v.id }}</span>
+          <span class="vehicle-progress-text">{{ getDownloadedBlocks(v.id) }} / {{ v.requestedBlocks?.length || 0 }}</span>
+        </div>
+        <el-progress
+          :percentage="getProgressPercent(v.id)"
+          :stroke-width="6"
+          :show-text="false"
+          class="vehicle-progress-bar"
+        />
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { VideoPlay, VideoPause, Refresh } from '@element-plus/icons-vue'
 import { useVehicleStore } from '../stores/vehicleStore'
 import socketService from '../services/socket'
 
+const props = defineProps({
+  rsuData: {
+    type: Object,
+    default: null,
+  },
+})
+
 const vehicleStore = useVehicleStore()
 
 const vehicles = computed(() => vehicleStore.vehicles)
+
+function getDownloadedBlocks(vehicleId) {
+  if (!props.rsuData?.vehicleTiles) return 0
+  const info = props.rsuData.vehicleTiles[vehicleId]
+  return info?.collectedCount || 0
+}
+
+function getRequestedBlocks(vehicleId) {
+  const v = vehicles.value.find(v => v.id === vehicleId)
+  return v?.requestedBlocks?.length || 0
+}
+
+function getProgressPercent(vehicleId) {
+  const total = getRequestedBlocks(vehicleId)
+  if (total === 0) return 0
+  const downloaded = getDownloadedBlocks(vehicleId)
+  return Math.round((downloaded / total) * 100)
+}
+
 const drivingStatus = computed(() => vehicleStore.drivingStatus)
 const selectedVehicleId = computed(() => vehicleStore.selectedVehicleId)
 
@@ -185,14 +219,11 @@ function selectVehicle(id) {
 }
 
 .vehicle-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .vehicle-item:hover {
@@ -204,13 +235,33 @@ function selectVehicle(id) {
   color: #409EFF;
 }
 
+.vehicle-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
 .vehicle-id {
   font-size: 13px;
   font-weight: 500;
 }
 
-.vehicle-speed {
-  font-size: 12px;
+.vehicle-progress-text {
+  font-size: 11px;
   color: #909399;
+  font-family: 'Courier New', monospace;
+}
+
+.vehicle-progress-bar {
+  margin: 0;
+}
+
+.vehicle-progress-bar :deep(.el-progress-bar__outer) {
+  background-color: #ebeef5;
+}
+
+.vehicle-item.active .vehicle-progress-bar :deep(.el-progress-bar__inner) {
+  background-color: #409EFF;
 }
 </style>
