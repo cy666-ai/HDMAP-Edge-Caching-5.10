@@ -25,7 +25,9 @@ export const useVehicleStore = defineStore('vehicle', () => {
     vehicles.value = data.map(v => ({
       ...v,
       heading: v.heading || 0,
-      speed: v.speed || 0
+      speed: v.speed || 0,
+      routeIndex: v.routeIndex || 0,
+      requestedBlocks: v.requestedBlocks || [],
     }))
   }
 
@@ -39,7 +41,9 @@ export const useVehicleStore = defineStore('vehicle', () => {
     } else {
       vehicles.value.push({
         ...vehicleData,
-        heading: vehicleData.heading || 0
+        heading: vehicleData.heading || 0,
+        routeIndex: vehicleData.routeIndex || 0,
+        requestedBlocks: vehicleData.requestedBlocks || [],
       })
     }
   }

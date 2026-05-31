@@ -15,6 +15,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { loadRouteCache, fetchAllAmapRoutes, saveRouteCache } from '../utils/amapRoute.js'
+import { computeRSUDeployment } from '../utils/rsuDeployment.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROUTE_CACHE_FILE = path.resolve(__dirname, '../../data/route_paths.json')
@@ -29,7 +30,7 @@ const ROUTE_DEFS = [
       [32.073000000000000, 118.77500000000000],  // 向东
       [32.074000000000000, 118.78500000000000],  // 向东
       [32.075000000000000, 118.79500000000000],  // 向东
-      [32.076777001742040, 118.81034025020665],  // 新庄站
+      [32.076387129198740, 118.80417158810707],  // 新庄站
     ],
   },
   {
@@ -47,12 +48,12 @@ const ROUTE_DEFS = [
   {
     id: 3, name: '汉中门→西安门', start: '汉中门站', end: '西安门站',
     waypoints: [
-      [32.042863325579320, 118.76711201979688],  // 汉中门站
+      [32.042793354220926, 118.76708202719072],  // 汉中门站
       [32.042500000000000, 118.77500000000000],  // 汉中路
       [32.041500000000000, 118.78300000000000],  // 汉中路
       [32.041000000000000, 118.79000000000000],  // 汉中路东段
       [32.040500000000000, 118.79800000000000],  // 汉中路东段
-      [32.040492177973746, 118.80596505656148],  // 西安门站
+      [32.040434898604204, 118.80425811526537],  // 西安门站
     ],
   },
   {
@@ -63,7 +64,7 @@ const ROUTE_DEFS = [
       [32.060000000000000, 118.76200000000000],  // 虎踞路
       [32.055000000000000, 118.76400000000000],  // 虎踞路
       [32.050000000000000, 118.76500000000000],  // 虎踞路
-      [32.042863325579320, 118.76711201979688],  // 汉中门站
+      [32.042793354220926, 118.76708202719072],  // 汉中门站
     ],
   },
   {
@@ -83,14 +84,14 @@ const ROUTE_DEFS = [
   {
     id: 6, name: '新庄→西安门', start: '新庄站', end: '西安门站',
     waypoints: [
-      [32.076777001742040, 118.81034025020665],  // 新庄站
+      [32.076387129198740, 118.80417158810707],  // 新庄站
       [32.074000000000000, 118.80900000000000],  // 向西南
       [32.070000000000000, 118.80800000000000],  // 向南
       [32.065000000000000, 118.80700000000000],  // 向南
       [32.060000000000000, 118.80600000000000],  // 向南
       [32.055000000000000, 118.80600000000000],  // 向南
       [32.050000000000000, 118.80600000000000],  // 向南
-      [32.040492177973746, 118.80596505656148],  // 西安门站
+      [32.040434898604204, 118.80425811526537],  // 西安门站
     ],
   },
 ]
@@ -222,6 +223,11 @@ export class SimulationService {
     this.vehiclePaths = []
 
     const VEHICLES_PER_ROUTE = 5
+
+    // 获取RSU部署数据，用于计算每辆车的内容块
+    const deployment = computeRSUDeployment()
+    const routeRsuCounts = deployment.routeRsuCounts || {}
+
     let vehicleId = 0
 
     for (const route of ROUTE_DEFS) {
@@ -239,6 +245,7 @@ export class SimulationService {
         // 每路线5辆车均匀分布，确保地图上清晰可见5辆车在移动
         const startIdx = Math.floor((i / VEHICLES_PER_ROUTE) * Math.max(path.length - 1, 1))
 
+        const rsuCountForRoute = routeRsuCounts[route.name] || 0
         this.vehicles.push({
           id: vehicleId,
           name: `车辆 ${vehicleId} (${route.name})`,
@@ -252,6 +259,11 @@ export class SimulationService {
           maxTrajectory: 50,
           routeId: route.id,
           routeName: route.name,
+          routeIndex: i + 1,
+          requestedBlocks: Array.from(
+            { length: rsuCountForRoute * 100 },
+            (_, idx) => idx + 1
+          ),
         })
 
         this.vehiclePaths.push(path)
@@ -388,6 +400,8 @@ export class SimulationService {
         trajectory: v.trajectory,
         routeId: v.routeId,
         routeName: v.routeName,
+        routeIndex: v.routeIndex,
+        requestedBlocks: v.requestedBlocks,
       })),
       timestamp: new Date().toISOString(),
       tick: this.tickCount

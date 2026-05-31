@@ -27,13 +27,17 @@ let rsuCoverageCircles = {}  // RSU覆盖半径圆圈（250m）
 const defaultCenter = [32.059000, 118.769000]
 const defaultZoom = 15
 
-const REGION_COLORS = {
-  1: '#F56C6C', // 红 - 北侧走廊
-  2: '#E6A23C', // 橙 - 中间走廊
-  3: '#67C23A', // 绿 - 南侧走廊
-}
-
 const RSU_COVERAGE_RADIUS_M = 250  // RSU 覆盖半径（米），与后端一致
+
+// 路线名称映射（用于RSU标记）
+const ROUTE_NAMES = {
+  1: '古平岗→新庄',
+  2: '草场门→九华山',
+  3: '汉中门→西安门',
+  4: '古平岗→汉中门',
+  5: '新模范马路→新街口',
+  6: '新庄→西安门',
+}
 
 // 高德地图切片图层（需要在实际使用时替换API密钥）
 const amapTileLayer = L.tileLayer('https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
@@ -75,11 +79,10 @@ function createCarIcon(heading = 0, routeId = 1) {
   })
 }
 
-// 创建轨迹线样式
-function getTrajectoryStyle(vehicleId) {
-  const colors = ['#409EFF', '#E6A23C', '#67C23A', '#F56C6C', '#909399', '#B37FEB']
-  const color = colors[vehicleId % colors.length]
-  return { color, weight: 3, opacity: 0.7 }
+// 创建轨迹线样式（按路线着色，与车辆图标颜色一致）
+function getTrajectoryStyle(routeId) {
+  const c = ROUTE_COLORS[routeId]
+  return { color: c ? c.body : '#909399', weight: 3, opacity: 0.7 }
 }
 
 /**
@@ -98,7 +101,9 @@ function initRsuMarkers() {
   if (rsuList.length === 0) return
 
   rsuList.forEach((rsu, idx) => {
-    const color = REGION_COLORS[rsu.region] || '#909399'
+    const routeColor = ROUTE_COLORS[rsu.routeId]
+    const color = routeColor ? routeColor.body : '#909399'
+    const routeName = ROUTE_NAMES[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
     const latlng = [rsu.latitude, rsu.longitude]
     const tileCount = props.rsuData?.rsuChunks?.[idx]?.length || 0
 
@@ -127,6 +132,7 @@ function initRsuMarkers() {
       <div style="font-size:13px;">
         <b>RSU #${rsu.id}</b><br/>
         位置: ${rsu.name}<br/>
+        所属路线: <span style="color:${color};font-weight:bold;">${routeName}</span><br/>
         区域: ${rsu.region}<br/>
         覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
         <span id="rsu-hitrate-${rsu.id}" style="color:#409EFF;font-weight:bold;">命中率: 计算中...</span><br/>
@@ -150,6 +156,9 @@ function updateRsuMarkers(rsuData) {
     if (!marker) continue
     const hitRate = (rsu.hitRate * 100).toFixed(1)
     const tileCount = rsuData.rsuChunks?.[idx]?.length || 0
+    const routeColor = ROUTE_COLORS[rsu.routeId]
+    const color = routeColor ? routeColor.body : '#909399'
+    const routeName = ROUTE_NAMES[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
     // 根据命中率调整透明度
     marker.setStyle({ fillOpacity: 0.3 + hitRate / 100 * 0.7 })
     // 更新 popup 内容
@@ -157,6 +166,7 @@ function updateRsuMarkers(rsuData) {
       <div style="font-size:13px;">
         <b>RSU #${rsu.id}</b><br/>
         位置: ${rsu.name}<br/>
+        所属路线: <span style="color:${color};font-weight:bold;">${routeName}</span><br/>
         区域: ${rsu.region}<br/>
         覆盖半径: ${RSU_COVERAGE_RADIUS_M}m<br/>
         <span style="color:#409EFF;font-weight:bold;">命中率: ${hitRate}%</span><br/>
@@ -233,7 +243,7 @@ function updateVehicleMarkers(vehicles) {
       vehicleMarkers[id] = marker
 
       // 初始化轨迹线
-      trajectoryLines[id] = L.polyline([], getTrajectoryStyle(id)).addTo(map)
+      trajectoryLines[id] = L.polyline([], getTrajectoryStyle(routeId)).addTo(map)
     }
 
     // 更新轨迹

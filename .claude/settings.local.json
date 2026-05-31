@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(netstat -ano)",
-      "Bash(findstr :3000)"
+      "Bash(findstr :3000)",
+      "Bash(dir \"c:/Users/Administrator/Desktop/HdMAP-Code/HDMAP-Edge Caching 5.10/simmap1.0\" /b)"
     ]
   }
 }
