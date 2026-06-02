@@ -414,7 +414,12 @@ class VehicleExporter {
 
             for (let i = 0; i < VEHICLES_PER_ROUTE; i++) {
                 vehicleId++;
-                const startIdx = Math.floor(Math.random() * Math.max(1, path.length - 5));
+                // 均匀分布: 每路线5辆车分别从路径 0%, 20%, 40%, 60%, 80% 处起步
+                // 加微小随机抖动(±2%)避免完全重叠
+                const maxStartIdx = Math.max(1, path.length - 5);
+                const baseRatio = i / VEHICLES_PER_ROUTE;
+                const jitter = (Math.random() - 0.5) * 0.04; // ±2% 抖动
+                const startIdx = Math.floor(Math.max(0, Math.min(baseRatio + jitter, 0.95)) * maxStartIdx);
 
                 this.vehicles.push({
                     id: vehicleId,
@@ -657,7 +662,7 @@ class VehicleExporter {
 // 7. 主入口
 // ============================================================
 function main() {
-    const totalTicks = parseInt(process.argv[2], 10) || 200;
+    const totalTicks = parseInt(process.argv[2], 10) || 300;
     console.log('========================================');
     console.log('  simmap1.0 → 5.10 车辆数据导出工具');
     console.log('========================================\n');
