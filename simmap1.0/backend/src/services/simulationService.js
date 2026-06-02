@@ -249,7 +249,11 @@ export class SimulationService {
       for (let i = 0; i < VEHICLES_PER_ROUTE; i++) {
         vehicleId++
         // 每路线5辆车均匀分布，确保地图上清晰可见5辆车在移动
-        const startIdx = Math.floor((i / VEHICLES_PER_ROUTE) * Math.max(path.length - 1, 1))
+        // 分别从路径 0%, 20%, 40%, 60%, 80% 处起步，加 ±2% 微小随机抖动
+        const maxStartIdx = Math.max(1, path.length - 2);
+        const baseRatio = i / VEHICLES_PER_ROUTE;
+        const jitter = (Math.random() - 0.5) * 0.04;
+        const startIdx = Math.floor(Math.max(0, Math.min(baseRatio + jitter, 0.90)) * maxStartIdx);
 
         const routeRsus = rsusByRoute[route.id] || []
         this.vehicles.push({
@@ -344,9 +348,9 @@ export class SimulationService {
       // 推进进度
       vehicle.pathProgress += step
       if (vehicle.pathProgress >= 1) {
+        // 车辆到达终点 → 停止运行，后续从广播中移除
         vehicle.pathProgress = 1
         vehicle.completed = true
-        // 锁定在终点位置
         const lastPt = path[path.length - 1]
         vehicle.latitude = lastPt.latitude
         vehicle.longitude = lastPt.longitude
@@ -395,7 +399,9 @@ export class SimulationService {
    */
   broadcastData() {
     const payload = {
-      vehicles: this.vehicles.map(v => ({
+      vehicles: this.vehicles
+        .filter(v => !v.completed)  // 已完成的车辆不广播，前端自动消失
+        .map(v => ({
         id: v.id,
         name: v.name,
         latitude: v.latitude,
@@ -410,7 +416,7 @@ export class SimulationService {
         requestedBlocks: v.requestedBlocks,
         routeRsuIds: v.routeRsuIds || [],               // 完整路由 RSU 序列（长久保存）
         upcomingRsuIds: this.cachingService?.getUpcomingRsuIds(v.id) || [],  // 实时剩余 RSU（每 tick 更新）
-      })),
+      })),  // .filter() + .map() 闭合
       timestamp: new Date().toISOString(),
       tick: this.tickCount
     }
