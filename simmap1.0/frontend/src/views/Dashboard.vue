@@ -21,10 +21,36 @@
         <MapView ref="mapViewRef" :rsuData="rsuData" />
       </div>
 
+      <!-- 拖拽分隔条 -->
+      <div class="resize-handle" @mousedown="startResize"></div>
+
       <!-- 右侧面板区域 -->
-      <div class="side-panel">
+      <div class="side-panel" :style="{ width: panelWidth + 'px' }">
         <ControlPanel />
-        <DataDisplay :rsuData="rsuData" />
+
+        <!-- 面板切换 Tab -->
+        <div class="panel-tabs">
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'monitor' }"
+            @click="activeTab = 'monitor'"
+          >
+            <el-icon :size="14"><Monitor /></el-icon>
+            <span>实时监控</span>
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'statistics' }"
+            @click="activeTab = 'statistics'"
+          >
+            <el-icon :size="14"><DataAnalysis /></el-icon>
+            <span>统计分析</span>
+          </button>
+        </div>
+
+        <!-- 面板内容区 -->
+        <DataDisplay v-if="activeTab === 'monitor'" :rsuData="rsuData" />
+        <StatisticsPanel v-if="activeTab === 'statistics'" :data="rsuData" :panelWidth="panelWidth" />
       </div>
     </div>
   </div>
@@ -32,16 +58,49 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Monitor, Aim } from '@element-plus/icons-vue'
+import { Monitor, Aim, DataAnalysis } from '@element-plus/icons-vue'
 import MapView from '../components/MapView.vue'
 import ControlPanel from '../components/ControlPanel.vue'
 import DataDisplay from '../components/DataDisplay.vue'
+import StatisticsPanel from '../components/StatisticsPanel.vue'
 import { useVehicleStore } from '../stores/vehicleStore'
 import socketService from '../services/socket'
 
 const vehicleStore = useVehicleStore()
 const mapViewRef = ref(null)
 const rsuData = ref(null)
+const activeTab = ref('monitor')
+
+// 右侧面板拖拽调整宽度
+const panelWidth = ref(320)
+const isResizing = ref(false)
+const resizeStartX = ref(0)
+const resizeStartWidth = ref(0)
+
+function startResize(e) {
+  isResizing.value = true
+  resizeStartX.value = e.clientX
+  resizeStartWidth.value = panelWidth.value
+  document.addEventListener('mousemove', onResize)
+  document.addEventListener('mouseup', stopResize)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResize(e) {
+  if (!isResizing.value) return
+  const dx = resizeStartX.value - e.clientX
+  const newWidth = resizeStartWidth.value + dx
+  panelWidth.value = Math.max(260, Math.min(600, newWidth))
+}
+
+function stopResize() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
 
 function fitMapView() {
   mapViewRef.value?.fitBounds()
@@ -147,17 +206,93 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.resize-handle {
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.2s;
+  position: relative;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: #409EFF44;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 40px;
+  border-radius: 1px;
+  background: #dcdfe6;
+  transition: background 0.2s;
+}
+
+.resize-handle:hover::after {
+  background: #409EFF;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 6px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #909399;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.tab-btn:hover {
+  color: #409EFF;
+  background: #ecf5ff;
+}
+
+.tab-btn.active {
+  color: #fff;
+  background: #409EFF;
+  box-shadow: 0 1px 4px rgba(64, 158, 255, 0.4);
+}
+
+.tab-btn.active .el-icon {
+  color: #fff;
+}
+
 @media (max-width: 900px) {
   .app-body {
     flex-direction: column;
   }
   .side-panel {
-    width: 100%;
+    width: 100% !important;
     flex-direction: row;
     overflow-x: auto;
   }
   .side-panel > * {
     min-width: 280px;
+  }
+  .resize-handle {
+    display: none;
   }
 }
 </style>

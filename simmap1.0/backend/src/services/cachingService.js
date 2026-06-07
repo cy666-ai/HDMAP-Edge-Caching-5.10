@@ -107,8 +107,16 @@ export class CachingService {
 
     // ========== 运行时状态 ==========
     this.tickCount = 0
+    this.lastActiveTick = 0
     this.vehicleCount = 0
     this.totalHitRate = 0
+
+    // 累积命中率历史（用于前端绘制时间序列曲线）
+    this.hitRateHistory = []  // [{ tick, totalHitRate, routes: {routeId: hitRate} }]
+    this.maxHistoryLength = 200  // 最多保留 200 个采样点
+
+    // 累积最大净效用历史（用于前端绘制时间片变化曲线）
+    this.maxNetUtilityHistory = []  // [{ tick, routes: {routeId: maxNetUtilityFinal} }]
 
     // 每辆车的 tile 收集状态
     // vehicleId → { visitedRSUs: Set<rsuIndex>, collectedTiles: Set<tileId>, routeId: number }
@@ -136,13 +144,14 @@ export class CachingService {
   onVehicleTick(vehicles, tickCount) {
     this.tickCount = tickCount
     this.vehicleCount = vehicles.length
+    if (this.vehicleCount > 0) this.lastActiveTick = tickCount
 
     this.updateRouteCounts(vehicles)
     this.trackVehicleTiles(vehicles)
     this.computeHitRate()
 
-    // 每 ALGO_INTERVAL_TICKS 个时间片触发一次算法重算
-    if (this.tickCount % ALGO_INTERVAL_TICKS === 0 && this.tickCount > 0) {
+    // 每 ALGO_INTERVAL_TICKS 个时间片触发一次算法重算（无车辆时跳过）
+    if (this.tickCount % ALGO_INTERVAL_TICKS === 0 && this.tickCount > 0 && this.vehicleCount > 0) {
       this.triggerAlgorithm()
     }
   }
@@ -312,6 +321,23 @@ export class CachingService {
 
     // 总命中率 = 加权平均
     this.totalHitRate = totalVehicles > 0 ? totalWeighted / totalVehicles : 0
+
+    // 记录累积命中率历史（仅在存在活跃车辆时记录）
+    if (totalVehicles > 0) {
+      const routeSnapshots = {}
+      for (const rd of Object.values(this.routeData)) {
+        if (rd.E > 0) routeSnapshots[rd.routeId] = rd.hitRate
+      }
+      this.hitRateHistory.push({
+        tick: this.tickCount,
+        totalHitRate: this.totalHitRate,
+        routes: routeSnapshots,
+      })
+      // 限制历史长度
+      if (this.hitRateHistory.length > this.maxHistoryLength) {
+        this.hitRateHistory = this.hitRateHistory.slice(-this.maxHistoryLength)
+      }
+    }
   }
 
   // ==================== 算法触发（Python） ====================
@@ -371,6 +397,23 @@ export class CachingService {
           // 5. 使用新缓存决策重新计算所有车辆的采集状态
           this.recalculateVehicleTiles()
           this.computeHitRate()
+
+          // 6. 记录最大净效用历史（用于前端绘制时间片变化曲线）
+          const utilitySnapshots = {}
+          for (const rd of Object.values(this.routeData)) {
+            if (rd.E > 0 && rd.maxNetUtilityFinal !== null) {
+              utilitySnapshots[rd.routeId] = rd.maxNetUtilityFinal
+            }
+          }
+          if (Object.keys(utilitySnapshots).length > 0) {
+            this.maxNetUtilityHistory.push({
+              tick: this.tickCount,
+              routes: utilitySnapshots,
+            })
+          }
+          if (this.maxNetUtilityHistory.length > this.maxHistoryLength) {
+            this.maxNetUtilityHistory = this.maxNetUtilityHistory.slice(-this.maxHistoryLength)
+          }
         }
       } else {
         this.algorithmError = result.error
@@ -474,8 +517,16 @@ export class CachingService {
         rd.cachedCount = routeResult.Total_Cached_Tiles || 0
         rd.maxTiles = (routeResult.E || rd.E) * (routeResult.X || rd.X)
 
+        // 读取算法输出的扩展统计字段
+        rd.maxNetUtilityMWC = routeResult.MaxNetUtility_MWC ?? null
+        rd.maxNetUtilityFinal = routeResult.MaxNetUtility_Final ?? null
+        rd.chrRsu = routeResult.CHR_RSU || []       // 每 RSU 缓存命中率（算法模型）
+        rd.chrTotal = routeResult.CHR_Total ?? null  // 路线级算法命中率
+        rd.wNet = routeResult.W_net || []            // 每瓦片净效用
+        rd.numBlocks = routeResult.NUM_BLOCKS || 0
+
         loadedCount++
-        console.log(`[Caching] 路线 ${rd.routeId} (${rd.name}): ${rd.cachedCount}/${rd.maxTiles} 块缓存, ${rd.E} 个 RSU`)
+        console.log(`[Caching] 路线 ${rd.routeId} (${rd.name}): ${rd.cachedCount}/${rd.maxTiles} 块缓存, ${rd.E} 个 RSU, MaxNetUtil=${rd.maxNetUtilityFinal?.toFixed(1)}`)
       }
 
       this.lastAlgorithmRun = data.timestamp || new Date().toISOString()
@@ -534,22 +585,94 @@ export class CachingService {
   }
 
   /**
+   * 计算实时逐RSU统计（每tick基于车辆采集数据，非算法模型）
+   * 返回: { [routeId]: { hitRates: number[], vehicleCounts: number[], perRsu: object[] } }
+   */
+  _computeRealTimeRsuMetrics() {
+    const result = {}
+    for (const [routeIdStr, rd] of Object.entries(this.routeData)) {
+      const routeId = Number(routeIdStr)
+      if (rd.E === 0) continue
+      const X = rd.X
+      const perRsu = rd.rsus.map((rsu, rsuIdx) => {
+        let totalHits = 0
+        let totalRequests = 0
+        let vehicleCount = 0
+        for (const state of this.vehicleTileState.values()) {
+          if (state.routeId !== routeId) continue
+          if (!state.visitedRSUs.has(rsuIdx)) continue
+          vehicleCount++
+          const rsuStartBlock = (rsu.id - 1) * X + 1
+          const rsuEndBlock = rsuStartBlock + X - 1
+          for (const block of state.requestedBlocks) {
+            if (block >= rsuStartBlock && block <= rsuEndBlock) totalRequests++
+          }
+          for (const block of state.collectedTiles) {
+            if (block >= rsuStartBlock && block <= rsuEndBlock) totalHits++
+          }
+        }
+        return {
+          rsuId: rsu.id,
+          rsuIdx,
+          vehicleCount,
+          hits: totalHits,
+          requests: totalRequests,
+          hitRate: totalRequests > 0 ? totalHits / totalRequests : 0,
+        }
+      })
+      result[routeId] = {
+        hitRates: perRsu.map(m => m.hitRate),
+        vehicleCounts: perRsu.map(m => m.vehicleCount),
+        perRsu,
+      }
+    }
+    return result
+  }
+
+  /**
    * 获取当前 RSU 数据（供 WebSocket 广播和 API 使用）
    */
   getCurrentData() {
+    const rtMetrics = this._computeRealTimeRsuMetrics()
+
     const routeData = Object.values(this.routeData)
       .filter(r => r.E > 0)
-      .map(r => ({
-        id: r.routeId,
-        name: r.name,
-        hitRate: r.hitRate,
-        vehicleCount: r.vehicleCount,
-        collectedTiles: this._getRouteCollectedCount(r.routeId),
-        E: r.E,
-        X: r.X,
-      }))
-    // 调试：打印广播的路线数据
-    console.log(`[Caching] 广播 ${routeData.length} 条路线:`, routeData.map(r => `${r.name}: ${r.E}个RSU, ${r.vehicleCount}辆车, ${r.collectedTiles}命中块`).join(' | '))
+      .map(r => {
+        const rt = rtMetrics[r.routeId]
+        return {
+          id: r.routeId,
+          name: r.name,
+          hitRate: r.hitRate,
+          vehicleCount: r.vehicleCount,
+          collectedTiles: this._getRouteCollectedCount(r.routeId),
+          E: r.E,
+          X: r.X,
+          // 扩展统计字段
+          maxNetUtilityMWC: r.maxNetUtilityMWC,
+          maxNetUtilityFinal: r.maxNetUtilityFinal,
+          cacheUtilization: r.maxTiles > 0
+            ? this._getRouteCollectedCount(r.routeId) / r.maxTiles : 0,  // 实时缓存利用率
+          chrRsu: r.chrRsu,                        // 每 RSU 命中率（算法模型）
+          chrTotal: r.chrTotal,                    // 路线级算法命中率
+          vehicleDensity: r.E > 0 ? r.vehicleCount / r.E : 0,  // 车辆密度（辆/RSU）
+          cachedCount: r.cachedCount,
+          maxTiles: r.maxTiles,
+          // 实时逐RSU统计（基于车辆采集数据，随tick变化）
+          realTimeRsuHitRates: rt?.hitRates || [],
+          realTimeRsuVehicleCounts: rt?.vehicleCounts || [],
+        }
+      })
+
+    // 计算 RSU 负载均衡度（基于各RSU当前车辆访问计数，实时变化）
+    const allRsuVehicleCounts = []
+    for (const data of Object.values(rtMetrics)) {
+      allRsuVehicleCounts.push(...data.vehicleCounts)
+    }
+    const meanVc = allRsuVehicleCounts.reduce((a, b) => a + b, 0) / (allRsuVehicleCounts.length || 1)
+    const varianceVc = allRsuVehicleCounts.reduce((sum, c) => sum + (c - meanVc) ** 2, 0) / (allRsuVehicleCounts.length || 1)
+    const stdDevVc = Math.sqrt(varianceVc)
+    const rsuLoadBalance = meanVc > 0 ? Math.max(0, 1 - stdDevVc / meanVc) : 0  // 1 = 完全均衡
+
     return {
       rsus: this.rsuPositions.map(rsu => {
         // 查找该 RSU 在其路线中的索引
@@ -568,20 +691,29 @@ export class CachingService {
             }
           }
         }
+        // 查找该 RSU 的实时统计
+        const rtRoute = rtMetrics[rsu.routeId]
+        const rtRsu = rtRoute?.perRsu?.find(m => m.rsuId === rsu.id)
         return {
           ...rsu,
           cachedTiles,         // 该 RSU 缓存的内容块 ID 列表（来自 MWC 决策）
           cacheEnabled: cachedTiles.length > 0,
+          realTimeVehicleCount: rtRsu?.vehicleCount ?? 0,
+          realTimeHitRate: rtRsu?.hitRate ?? 0,
         }
       }),
       // 各车辆采集的内容块信息（供前端 DataDisplay 选中车辆详情使用）
       vehicleTiles: this._getVehicleTiles(),
       routes: routeData,
       totalHitRate: this.totalHitRate,
-      matlabRunning: this.algorithmRunning,    // 保持前端字段名兼容
-      matlabError: this.algorithmError,        // 保持前端字段名兼容
-      lastMatlabRun: this.lastAlgorithmRun,    // 保持前端字段名兼容
-      tick: this.tickCount,
+      // 扩展统计
+      rsuLoadBalance,          // RSU 负载均衡度 (0-1)
+      hitRateHistory: this.hitRateHistory,  // 累积命中率时间序列
+      maxNetUtilityHistory: this.maxNetUtilityHistory,  // 最大净效用随时间片变化
+      matlabRunning: this.algorithmRunning,
+      matlabError: this.algorithmError,
+      lastMatlabRun: this.lastAlgorithmRun,
+      tick: this.vehicleCount > 0 ? this.tickCount : this.lastActiveTick,
       timestamp: new Date().toISOString(),
     }
   }
@@ -639,7 +771,10 @@ export class CachingService {
   reset() {
     this.vehicleTileState.clear()
     this.tickCount = 0
+    this.lastActiveTick = 0
     this.totalHitRate = 0
+    this.hitRateHistory = []
+    this.maxNetUtilityHistory = []
     this.algorithmError = null
     for (const rd of Object.values(this.routeData)) {
       rd.vehicleCount = 0
