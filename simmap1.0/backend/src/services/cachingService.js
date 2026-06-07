@@ -187,6 +187,7 @@ export class CachingService {
           collectedTiles: new Set(),
           routeId: v.routeId,
           requestedBlocks: new Set(v.requestedBlocks || []),
+          aheadRsuIds: v.routeRsuIds || [],           // 该车将要途经的RSU ID（已过滤掉后方RSU）
         })
       }
     }
@@ -275,8 +276,9 @@ export class CachingService {
   /**
    * 计算每条路线的缓存命中率
    *
-   * 路线命中率 = 该路线所有车辆命中的内容块总数 / (该路线车辆数 × 路线总内容块数)
-   * 其中"命中的内容块" = 车辆申请的 ∩ RSU缓存的（即车辆经过RSU时，其需要的内容块正好被RSU缓存）
+   * 路线命中率 = 该路线所有车辆已收集的瓦片总数 /
+   *              路线上每一辆车申请的总内容块数量之和
+   * 其中每辆车申请的内容块数量 = 该车将要经过的RSU数量 × RSU容量上限(100)
    * 系统总命中率 = 所有路线命中率的车辆数加权平均
    */
   computeHitRate() {
@@ -289,23 +291,19 @@ export class CachingService {
         continue
       }
 
-      const totalTilesPerVehicle = rd.E * rd.X
-      if (totalTilesPerVehicle === 0) {
-        rd.hitRate = 0
-        continue
-      }
-
       let routeCollectedSum = 0
+      let routeRequestedSum = 0
       let vehicleCountOnRoute = 0
 
       for (const state of this.vehicleTileState.values()) {
         if (state.routeId !== rd.routeId) continue
         routeCollectedSum += state.collectedTiles.size
+        routeRequestedSum += state.requestedBlocks.size
         vehicleCountOnRoute++
       }
 
-      rd.hitRate = vehicleCountOnRoute > 0
-        ? routeCollectedSum / (vehicleCountOnRoute * totalTilesPerVehicle)
+      rd.hitRate = routeRequestedSum > 0
+        ? routeCollectedSum / routeRequestedSum
         : 0
 
       totalWeighted += rd.hitRate * vehicleCountOnRoute
@@ -502,9 +500,10 @@ export class CachingService {
     if (!state) return []
     const rd = this.routeData[state.routeId]
     if (!rd) return []
+    const aheadSet = new Set(state.aheadRsuIds || [])
     return rd.rsus
       .map((rsu, idx) => ({ id: rsu.id, idx }))
-      .filter(({ idx }) => !state.visitedRSUs.has(idx))
+      .filter(({ idx, id }) => !state.visitedRSUs.has(idx) && aheadSet.has(id))
       .map(({ id }) => id)
   }
 
@@ -520,9 +519,10 @@ export class CachingService {
       const rd = this.routeData[state.routeId]
       let upcomingRsuIds = []
       if (rd) {
+        const aheadSet = new Set(state.aheadRsuIds || [])
         upcomingRsuIds = rd.rsus
           .map((rsu, idx) => ({ id: rsu.id, idx }))
-          .filter(({ idx }) => !state.visitedRSUs.has(idx))
+          .filter(({ idx, id }) => !state.visitedRSUs.has(idx) && aheadSet.has(id))
           .map(({ id }) => id)
       }
 

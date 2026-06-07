@@ -1,7 +1,7 @@
 <template>
   <div class="control-panel">
     <div class="panel-header">
-      <span class="panel-title">行驶控制</span>
+      <span class="panel-title">模拟控制</span>
       <el-tag :type="statusTagType" size="small" effect="dark">
         {{ statusText }}
       </el-tag>
@@ -15,7 +15,7 @@
         @click="startDriving"
         round
       >
-        开始行驶
+        开始模拟
       </el-button>
 
       <el-button
@@ -41,7 +41,7 @@
 
     <div class="speed-control">
       <div class="control-label">
-        <span>速度等级</span>
+        <span>时间速率</span>
         <span class="speed-value">{{ speedLevel }}x</span>
       </div>
       <el-slider
@@ -55,27 +55,6 @@
       />
     </div>
 
-    <div class="vehicle-list" v-if="vehicles.length > 0">
-      <div class="control-label">车辆列表 ({{ vehicles.length }})</div>
-      <div
-        v-for="v in vehicles"
-        :key="v.id"
-        class="vehicle-item"
-        :class="{ active: selectedVehicleId === v.id }"
-        @click="selectVehicle(v.id)"
-      >
-        <div class="vehicle-item-row">
-          <span class="vehicle-id">车辆 #{{ v.id }}</span>
-          <span class="vehicle-progress-text">{{ getDownloadedBlocks(v.id) }} / {{ v.requestedBlocks?.length || 0 }}</span>
-        </div>
-        <el-progress
-          :percentage="getProgressPercent(v.id)"
-          :stroke-width="6"
-          :show-text="false"
-          class="vehicle-progress-bar"
-        />
-      </div>
-    </div>
   </div>
 </template>
 
@@ -85,37 +64,9 @@ import { VideoPlay, VideoPause, Refresh } from '@element-plus/icons-vue'
 import { useVehicleStore } from '../stores/vehicleStore'
 import socketService from '../services/socket'
 
-const props = defineProps({
-  rsuData: {
-    type: Object,
-    default: null,
-  },
-})
-
 const vehicleStore = useVehicleStore()
 
-const vehicles = computed(() => vehicleStore.vehicles)
-
-function getDownloadedBlocks(vehicleId) {
-  if (!props.rsuData?.vehicleTiles) return 0
-  const info = props.rsuData.vehicleTiles[vehicleId]
-  return info?.collectedCount || 0
-}
-
-function getRequestedBlocks(vehicleId) {
-  const v = vehicles.value.find(v => v.id === vehicleId)
-  return v?.requestedBlocks?.length || 0
-}
-
-function getProgressPercent(vehicleId) {
-  const total = getRequestedBlocks(vehicleId)
-  if (total === 0) return 0
-  const downloaded = getDownloadedBlocks(vehicleId)
-  return Math.round((downloaded / total) * 100)
-}
-
 const drivingStatus = computed(() => vehicleStore.drivingStatus)
-const selectedVehicleId = computed(() => vehicleStore.selectedVehicleId)
 
 const speedLevel = computed({
   get: () => vehicleStore.speedLevel,
@@ -155,10 +106,6 @@ function pauseDriving() {
 function resetDriving() {
   socketService.emit('simulation:reset')
   vehicleStore.reset()
-}
-
-function selectVehicle(id) {
-  vehicleStore.setSelectedVehicle(id)
 }
 </script>
 
@@ -211,57 +158,5 @@ function selectVehicle(id) {
 .speed-value {
   font-weight: 600;
   color: #409EFF;
-}
-
-.vehicle-list {
-  border-top: 1px solid #ebeef5;
-  padding-top: 12px;
-}
-
-.vehicle-item {
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-bottom: 6px;
-}
-
-.vehicle-item:hover {
-  background: #f5f7fa;
-}
-
-.vehicle-item.active {
-  background: #ecf5ff;
-  color: #409EFF;
-}
-
-.vehicle-item-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.vehicle-id {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.vehicle-progress-text {
-  font-size: 11px;
-  color: #909399;
-  font-family: 'Courier New', monospace;
-}
-
-.vehicle-progress-bar {
-  margin: 0;
-}
-
-.vehicle-progress-bar :deep(.el-progress-bar__outer) {
-  background-color: #ebeef5;
-}
-
-.vehicle-item.active .vehicle-progress-bar :deep(.el-progress-bar__inner) {
-  background-color: #409EFF;
 }
 </style>

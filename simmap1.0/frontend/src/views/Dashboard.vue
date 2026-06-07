@@ -23,7 +23,7 @@
 
       <!-- 右侧面板区域 -->
       <div class="side-panel">
-        <ControlPanel :rsuData="rsuData" />
+        <ControlPanel />
         <DataDisplay :rsuData="rsuData" />
       </div>
     </div>

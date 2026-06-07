@@ -183,7 +183,7 @@ function generateRouteRSUPoints(routes) {
       else ptName = `${route.name} (${distFromStart}m)`
 
       if (isFarEnough(lat, lng, points, MIN_DIST_M)) {
-        points.push({ lat, lng, name: ptName, routeId })
+        points.push({ lat, lng, name: ptName, routeId, pathDist: targetDist })
       }
     }
   }
@@ -225,6 +225,7 @@ export function computeRSUDeployment() {
         name: pt.name,
         region: r + 1,
         routeId: pt.routeId || 1,
+        pathDist: pt.pathDist || 0,
       })
     }
   }

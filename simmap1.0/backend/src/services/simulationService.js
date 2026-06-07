@@ -96,6 +96,31 @@ const ROUTE_DEFS = [
   },
 ]
 
+/**
+ * Haversine 距离计算（米）
+ */
+function haversineDist(lat1, lng1, lat2, lng2) {
+  const R = 6371000
+  const toRad = d => d * Math.PI / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/**
+ * 计算路径数组中从起点到指定索引的累积距离（米）
+ */
+function computePathDistAt(path, pointIndex) {
+  let dist = 0
+  const end = Math.min(pointIndex, path.length - 1)
+  for (let i = 0; i < end; i++) {
+    dist += haversineDist(path[i].latitude, path[i].longitude, path[i + 1].latitude, path[i + 1].longitude)
+  }
+  return dist
+}
+
 export class SimulationService {
   constructor(io) {
     this.io = io
@@ -236,6 +261,11 @@ export class SimulationService {
 
     let vehicleId = 0
 
+    // 按路径顺序排序各路线 RSU
+    for (const rid of Object.keys(rsusByRoute)) {
+      rsusByRoute[rid].sort((a, b) => (a.pathDist || 0) - (b.pathDist || 0))
+    }
+
     for (const route of ROUTE_DEFS) {
       // 优先使用高德真实路径，回退到线性插值
       const amapPath = this.amapRoutePaths.get(route.id)
@@ -256,6 +286,10 @@ export class SimulationService {
         const startIdx = Math.floor(Math.max(0, Math.min(baseRatio + jitter, 0.90)) * maxStartIdx);
 
         const routeRsus = rsusByRoute[route.id] || []
+        // 计算车辆起步位置的路径距离，过滤出前方 RSU
+        const vehicleStartDist = computePathDistAt(path, startIdx)
+        const aheadRsus = routeRsus.filter(rsu => (rsu.pathDist || 0) >= vehicleStartDist)
+
         this.vehicles.push({
           id: vehicleId,
           name: `车辆 ${vehicleId} (${route.name})`,
@@ -270,10 +304,10 @@ export class SimulationService {
           routeId: route.id,
           routeName: route.name,
           routeIndex: i + 1,
-          requestedBlocks: routeRsus.flatMap(rsu =>
+          requestedBlocks: aheadRsus.flatMap(rsu =>
             Array.from({ length: 100 }, (_, i) => (rsu.id - 1) * 100 + i + 1)
           ),
-          routeRsuIds: routeRsus.map(r => r.id),        // 将要途经的 RSU ID 列表
+          routeRsuIds: aheadRsus.map(r => r.id),        // 将要途经的 RSU ID 列表（路径顺序）
         })
 
         this.vehiclePaths.push(path)
