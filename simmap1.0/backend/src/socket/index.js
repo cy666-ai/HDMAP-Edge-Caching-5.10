@@ -26,9 +26,9 @@ export function setupSocketHandlers(io) {
       simulationService.start(speedLevel)
       io.emit('simulation:status', { status: 'started', speedLevel })
 
-      // 启动 RSU 数据广播和 MATLAB 周期重算
+      // 启动 RSU 数据广播和算法周期重算
       cachingService.startBroadcast()
-      cachingService.startMatlabLoop()
+      cachingService.startAlgorithmLoop()
     })
 
     // 暂停模拟
@@ -60,10 +60,10 @@ export function setupSocketHandlers(io) {
       socket.emit('rsu:update', cachingService.getCurrentData())
     })
 
-    // 手动触发 MATLAB 重算
+    // 手动触发算法重算
     socket.on('rsu:recalc', async () => {
-      console.log(`[Socket] 收到 MATLAB 重算指令 from ${socket.id}`)
-      await cachingService.triggerMatlab()
+      console.log(`[Socket] 收到算法重算指令 from ${socket.id}`)
+      await cachingService.triggerAlgorithm()
       socket.emit('rsu:update', cachingService.getCurrentData())
     })
 

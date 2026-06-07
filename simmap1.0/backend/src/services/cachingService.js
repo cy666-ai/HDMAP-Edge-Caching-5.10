@@ -3,8 +3,8 @@
  *
  * 职责:
  * 1. 按路线（6条）管理 RSU 数据和车辆分布
- * 2. 每 5 个时间片触发 MATLAB 执行 MWC 算法（每条路线单独计算）
- * 3. 加载 MATLAB 输出的每路线 CacheDecision（各 RSU 缓存哪些内容块）
+ * 2. 每 5 个时间片触发 Python 执行 MWC 算法（每条路线单独计算）
+ * 3. 加载 Python 输出的每路线 CacheDecision（各 RSU 缓存哪些内容块）
  * 4. 每当车辆进入 RSU 覆盖范围时，对比 RSU 缓存内容与车辆需求计算命中率
  * 5. 通过 WebSocket 广播 RSU 数据和命中率
  */
@@ -37,8 +37,8 @@ const CHUNKS_PER_RSU = 100
 // 车辆-RSU 近距离匹配阈值（米）
 const RSU_PROXIMITY_M = 300
 
-// MATLAB 重算间隔（时间片数）
-const MATLAB_INTERVAL_TICKS = 5
+// 算法重算间隔（时间片数）
+const ALGO_INTERVAL_TICKS = 5
 
 // 6 条车辆路线定义
 const ROUTE_DEFS = [
@@ -114,9 +114,9 @@ export class CachingService {
     // vehicleId → { visitedRSUs: Set<rsuIndex>, collectedTiles: Set<tileId>, routeId: number }
     this.vehicleTileState = new Map()
 
-    this.lastMatlabRun = null
-    this.matlabRunning = false
-    this.matlabError = null
+    this.lastAlgorithmRun = null
+    this.algorithmRunning = false
+    this.algorithmError = null
     this.broadcastTimer = null
     this.matlabTimer = null
 
@@ -141,9 +141,9 @@ export class CachingService {
     this.trackVehicleTiles(vehicles)
     this.computeHitRate()
 
-    // 每 MATLAB_INTERVAL_TICKS 个时间片触发一次 MATLAB 重算
-    if (this.tickCount % MATLAB_INTERVAL_TICKS === 0 && this.tickCount > 0) {
-      this.triggerMatlab()
+    // 每 ALGO_INTERVAL_TICKS 个时间片触发一次算法重算
+    if (this.tickCount % ALGO_INTERVAL_TICKS === 0 && this.tickCount > 0) {
+      this.triggerAlgorithm()
     }
   }
 
@@ -314,12 +314,12 @@ export class CachingService {
     this.totalHitRate = totalVehicles > 0 ? totalWeighted / totalVehicles : 0
   }
 
-  // ==================== MATLAB 触发 ====================
+  // ==================== 算法触发（Python） ====================
 
   /**
-   * 构建 MATLAB 输入数据（每条路线独立参数）
+   * 构建算法输入数据（每条路线独立参数）
    */
-  buildMatlabInput() {
+  buildAlgorithmInput() {
     return {
       algorithmParams: { ...ALGO_PARAMS },
       routes: Object.values(this.routeData)
@@ -336,21 +336,21 @@ export class CachingService {
   }
 
   /**
-   * 触发 MATLAB 重算
+   * 触发 Python 算法重算
    */
-  async triggerMatlab() {
-    if (this.matlabRunning) {
-      console.log(`[Caching] MATLAB 正在运行中，跳过本次触发 (tick=${this.tickCount})`)
+  async triggerAlgorithm() {
+    if (this.algorithmRunning) {
+      console.log(`[Caching] 算法正在运行中，跳过本次触发 (tick=${this.tickCount})`)
       return
     }
 
-    this.matlabRunning = true
-    this.matlabError = null
-    console.log(`[Caching] 触发 MATLAB 重算 (tick=${this.tickCount})...`)
+    this.algorithmRunning = true
+    this.algorithmError = null
+    console.log(`[Caching] 触发 Python 算法重算 (tick=${this.tickCount})...`)
 
     try {
       // 1. 写入输入 JSON
-      const input = this.buildMatlabInput()
+      const input = this.buildAlgorithmInput()
       const inputPath = path.join(DATA_DIR, '_vehicle_input.json')
       fs.writeFileSync(inputPath, JSON.stringify(input, null, 2), 'utf-8')
 
@@ -361,8 +361,8 @@ export class CachingService {
       }
       this._lastInputRouteParams = routeParams
 
-      // 3. 启动 MATLAB
-      const result = await this.runMatlabProcess()
+      // 3. 启动 Python 算法
+      const result = await this.runAlgorithmProcess()
 
       if (result.success) {
         // 4. 加载结果
@@ -373,33 +373,31 @@ export class CachingService {
           this.computeHitRate()
         }
       } else {
-        this.matlabError = result.error
-        console.error(`[Caching] MATLAB 运行失败: ${result.error}`)
+        this.algorithmError = result.error
+        console.error(`[Caching] 算法运行失败: ${result.error}`)
       }
     } catch (err) {
-      this.matlabError = err.message
-      console.error(`[Caching] MATLAB 异常: ${err.message}`)
+      this.algorithmError = err.message
+      console.error(`[Caching] 算法异常: ${err.message}`)
     } finally {
-      this.matlabRunning = false
+      this.algorithmRunning = false
     }
   }
 
   /**
-   * 执行 MATLAB 子进程
+   * 执行 Python 算法子进程
    */
-  runMatlabProcess() {
+  runAlgorithmProcess() {
     return new Promise((resolve) => {
-      const scriptName = 'HM_Export_CacheDecision'
-      const matlabDir = path.resolve(__dirname, '../../../../5.10')
+      const scriptPath = path.resolve(__dirname, '../../../../algorithm/hm_export_cache_decision.py')
+      const algoDir = path.resolve(__dirname, '../../../../algorithm')
 
-      console.log(`[Caching] 启动 MATLAB: ${scriptName} (目录: ${matlabDir})`)
+      console.log(`[Caching] 启动 Python 算法: ${scriptPath}`)
 
-      const child = spawn('matlab', [
-        '-batch',
-        scriptName,
-        '-sd', matlabDir,
+      const child = spawn('python', [
+        scriptPath,
       ], {
-        cwd: matlabDir,
+        cwd: algoDir,
         timeout: 120000,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -418,7 +416,7 @@ export class CachingService {
       child.on('close', (code) => {
         if (code === 0) {
           // 输出各路线结果摘要
-          const routeMatches = stdout.matchAll(/路线 (\d+) \(.*?\): E=(\d+), X=(\d+), 缓存=(\d+)\/(\d+)/g)
+          const routeMatches = stdout.matchAll(/路线 (\d+): E=(\d+), X=(\d+), .*?缓存块数:\s*(\d+)\/(\d+)/g)
           for (const m of routeMatches) {
             console.log(`[Caching] 路线 ${m[1]}: ${m[4]}/${m[5]} 块缓存`)
           }
@@ -426,7 +424,7 @@ export class CachingService {
         } else {
           resolve({
             success: false,
-            error: `MATLAB 退出码 ${code}: ${stderr || stdout.slice(-200)}`,
+            error: `Python 算法退出码 ${code}: ${stderr || stdout.slice(-200)}`,
           })
         }
       })
@@ -437,10 +435,10 @@ export class CachingService {
     })
   }
 
-  // ==================== 加载 MATLAB 结果 ====================
+  // ==================== 加载算法结果 ====================
 
   /**
-   * 从 MATLAB 输出的 cache_decision.json 加载每路线的缓存决策
+   * 从算法输出的 cache_decision.json 加载每路线的缓存决策
    */
   loadResults() {
     const filePath = path.join(DATA_DIR, 'cache_decision.json')
@@ -480,9 +478,9 @@ export class CachingService {
         console.log(`[Caching] 路线 ${rd.routeId} (${rd.name}): ${rd.cachedCount}/${rd.maxTiles} 块缓存, ${rd.E} 个 RSU`)
       }
 
-      this.lastMatlabRun = data.timestamp || new Date().toISOString()
-      this.matlabError = null
-      console.log(`[Caching] 已加载 ${loadedCount} 条路线的 MATLAB 结果`)
+      this.lastAlgorithmRun = data.timestamp || new Date().toISOString()
+      this.algorithmError = null
+      console.log(`[Caching] 已加载 ${loadedCount} 条路线的算法结果`)
       return loadedCount > 0
     } catch (err) {
       console.error(`[Caching] 加载结果失败: ${err.message}`)
@@ -580,9 +578,9 @@ export class CachingService {
       vehicleTiles: this._getVehicleTiles(),
       routes: routeData,
       totalHitRate: this.totalHitRate,
-      matlabRunning: this.matlabRunning,
-      matlabError: this.matlabError,
-      lastMatlabRun: this.lastMatlabRun,
+      matlabRunning: this.algorithmRunning,    // 保持前端字段名兼容
+      matlabError: this.algorithmError,        // 保持前端字段名兼容
+      lastMatlabRun: this.lastAlgorithmRun,    // 保持前端字段名兼容
       tick: this.tickCount,
       timestamp: new Date().toISOString(),
     }
@@ -622,16 +620,16 @@ export class CachingService {
   }
 
   /**
-   * 启动 MATLAB 周期（首次加载/触发）
+   * 启动算法周期（首次加载/触发）
    * 后续由 onVehicleTick 的每 5 tick 自动触发
    */
-  startMatlabLoop() {
+  startAlgorithmLoop() {
     // 尝试立即加载已有结果
     const loaded = this.loadResults()
 
     // 首次运行（如果没有缓存结果）
     if (!loaded) {
-      this.triggerMatlab()
+      this.triggerAlgorithm()
     }
   }
 
@@ -642,6 +640,7 @@ export class CachingService {
     this.vehicleTileState.clear()
     this.tickCount = 0
     this.totalHitRate = 0
+    this.algorithmError = null
     for (const rd of Object.values(this.routeData)) {
       rd.vehicleCount = 0
       rd.hitRate = 0

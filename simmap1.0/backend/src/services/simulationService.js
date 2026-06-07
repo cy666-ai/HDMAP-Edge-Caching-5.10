@@ -4,11 +4,10 @@
  * 优先加载 data/roads.json 中的高德地图真实道路数据，
  * 文件不存在时回退到内置道路。
  *
- * Matlab/Python 集成说明：
- * - 设置环境变量 USE_EXTERNAL_ALGORITHM=true 启用外部算法
- * - Python脚本路径: ../algorithm/python/simulate.py
- * - Matlab文件路径: ../algorithm/matlab/simulate.m
- * - 通过 child_process 调用 Python，Python 再通过 matlabengine 调用 Matlab
+ * Python 算法集成说明（v5.10）：
+ * - CachingService 通过 child_process 直接调用 Python 算法
+ * - Python脚本路径: ../../algorithm/hm_export_cache_decision.py
+ * - 已移除 MATLAB 依赖，全部使用 Python (numpy/scipy/networkx) 计算
  */
 
 import fs from 'fs'
@@ -457,7 +456,7 @@ export class SimulationService {
 
     this.io.emit('vehicle:update', payload)
 
-    // 通知 CachingService 更新 RSU 数据和命中率（传递 tickCount 用于定时触发 MATLAB）
+    // 通知 CachingService 更新 RSU 数据和命中率（传递 tickCount 用于定时触发算法）
     if (this.cachingService) {
       this.cachingService.onVehicleTick(this.vehicles, this.tickCount)
     }

@@ -9,5 +9,18 @@
       "Bash(python3 -c ' *)",
       "Bash(python -c ' *)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -c \"[System.Console]::Beep(800, 300); [System.Console]::Beep(1000, 200)\""
+          }
+        ]
+      }
+    ]
   }
 }
