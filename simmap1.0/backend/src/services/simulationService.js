@@ -127,6 +127,8 @@ export class SimulationService {
     this.running = false
     this.paused = false
     this.speedLevel = 5
+    this.routeVehicleCounts = { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
+    this.avgSpeed = 1.0      // 平均速度倍率
     this.tickCount = 0
     this.cachingService = null
 
@@ -159,7 +161,7 @@ export class SimulationService {
       ]
     }
 
-    this.initVehicles()
+    this.initVehicles(this.routeVehicleCounts, this.avgSpeed)
   }
 
   /**
@@ -240,13 +242,16 @@ export class SimulationService {
   }
 
   /**
-   * 初始化车辆（按6条固定路线分配，每路线5辆）
+   * 初始化车辆（按6条固定路线分配，每条路线车辆数由参数控制）
+   * @param {Object} routeVehicleCounts - { 1: n1, 2: n2, ..., 6: n6 }
+   * @param {number} avgSpeed - 平均速度倍率
    */
-  initVehicles() {
+  initVehicles(routeVehicleCounts, avgSpeed = 1.0) {
     this.vehicles = []
     this.vehiclePaths = []
 
-    const VEHICLES_PER_ROUTE = 5
+    const counts = routeVehicleCounts || { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
+    const speedMultiplier = avgSpeed || 1.0
 
     // 获取RSU部署数据，用于计算每辆车的内容块
     const deployment = computeRSUDeployment()
@@ -272,15 +277,16 @@ export class SimulationService {
         ? amapPath
         : this.generateRoutePath(route.waypoints)
 
+      const vehiclesPerRoute = counts[route.id] || 5
       const sourceLabel = (amapPath && amapPath.length >= 2) ? '高德API' : '插值'
-      console.log(`  [路线 ${route.id}] ${route.name}: ${path.length} 个路径点 (${sourceLabel})`)
+      console.log(`  [路线 ${route.id}] ${route.name}: ${path.length} 个路径点, ${vehiclesPerRoute}辆车 (${sourceLabel})`)
 
-      for (let i = 0; i < VEHICLES_PER_ROUTE; i++) {
+      for (let i = 0; i < vehiclesPerRoute; i++) {
         vehicleId++
-        // 每路线5辆车均匀分布，确保地图上清晰可见5辆车在移动
-        // 分别从路径 0%, 20%, 40%, 60%, 80% 处起步，加 ±2% 微小随机抖动
+        // 每路线车辆均匀分布，确保地图上清晰可见
+        // 分别从路径不同位置起步，加 ±2% 微小随机抖动
         const maxStartIdx = Math.max(1, path.length - 2);
-        const baseRatio = i / VEHICLES_PER_ROUTE;
+        const baseRatio = i / vehiclesPerRoute;
         const jitter = (Math.random() - 0.5) * 0.04;
         const startIdx = Math.floor(Math.max(0, Math.min(baseRatio + jitter, 0.90)) * maxStartIdx);
 
@@ -294,7 +300,7 @@ export class SimulationService {
           name: `车辆 ${vehicleId} (${route.name})`,
           latitude: path[startIdx].latitude,
           longitude: path[startIdx].longitude,
-          speed: 30 + Math.random() * 40,
+          speed: (30 + Math.random() * 40) * speedMultiplier,
           heading: 0,
           pathProgress: startIdx / (path.length - 1),
           completed: false,
@@ -313,7 +319,8 @@ export class SimulationService {
       }
     }
 
-    console.log(`[Simulation] 已初始化 ${vehicleId} 辆车，分配至 ${ROUTE_DEFS.length} 条固定路线`)
+    const perRouteSummary = ROUTE_DEFS.map(r => `${r.name}:${counts[r.id] || 5}辆`).join(', ')
+    console.log(`[Simulation] 已初始化 ${vehicleId} 辆车，分配: ${perRouteSummary}，速度倍率 ${speedMultiplier}x`)
   }
 
   /**
@@ -369,7 +376,7 @@ export class SimulationService {
    * 更新所有车辆位置
    */
   updateVehicles() {
-    const step = 0.01 * (this.speedLevel / 5)
+    const step = 0.01 * (this.speedLevel / 5) * this.avgSpeed
 
     this.vehicles.forEach((vehicle, idx) => {
       const path = this.vehiclePaths[idx]
@@ -407,8 +414,8 @@ export class SimulationService {
       // 计算方向
       vehicle.heading = this.calculateHeading(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
 
-      // 模拟速度波动
-      vehicle.speed = Math.max(10, 30 + this.speedLevel * 8 + Math.sin(this.tickCount * 0.1 + idx) * 10)
+      // 模拟速度波动（受平均速度倍率影响）
+      vehicle.speed = Math.max(10, (30 + this.speedLevel * 8 + Math.sin(this.tickCount * 0.1 + idx) * 10) * this.avgSpeed)
 
       // 更新轨迹
       vehicle.trajectory.push({
@@ -465,17 +472,23 @@ export class SimulationService {
   /**
    * 启动模拟
    */
-  start(speedLevel) {
+  start(speedLevel, routeVehicleCounts, avgSpeed) {
     this.speedLevel = speedLevel || 5
+    this.routeVehicleCounts = routeVehicleCounts || { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
+    this.avgSpeed = avgSpeed || 1.0
     this.running = true
     this.paused = false
+
+    // 用新参数重新初始化车辆
+    this.initVehicles(this.routeVehicleCounts, this.avgSpeed)
 
     if (this.timer) {
       clearInterval(this.timer)
     }
 
+    const total = Object.values(this.routeVehicleCounts).reduce((a, b) => a + b, 0)
     const interval = Math.max(100, 1000 - (this.speedLevel - 1) * 100)
-    console.log(`[Simulation] 启动模拟, 速度等级: ${this.speedLevel}, 推送间隔: ${interval}ms`)
+    console.log(`[Simulation] 启动模拟, 速度等级: ${this.speedLevel}, 车辆总数: ${total}, 速度倍率: ${this.avgSpeed}x, 推送间隔: ${interval}ms`)
 
     // 先发送初始数据
     this.updateVehicles()
@@ -516,7 +529,7 @@ export class SimulationService {
     this.running = false
     this.paused = false
     this.tickCount = 0
-    this.initVehicles()
+    this.initVehicles(this.routeVehicleCounts, this.avgSpeed)
     console.log('[Simulation] 模拟已重置')
   }
 

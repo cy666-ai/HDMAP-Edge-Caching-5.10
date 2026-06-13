@@ -23,8 +23,11 @@ export function setupSocketHandlers(io) {
     socket.on('simulation:start', (data) => {
       console.log(`[Simulation] 收到开始指令 from ${socket.id}`)
       const speedLevel = data?.speedLevel || 5
-      simulationService.start(speedLevel)
-      io.emit('simulation:status', { status: 'started', speedLevel })
+      const routeVehicleCounts = data?.routeVehicleCounts || { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
+      const avgSpeed = data?.avgSpeed || 1.0
+      simulationService.start(speedLevel, routeVehicleCounts, avgSpeed)
+      const vehicleCount = Object.values(routeVehicleCounts).reduce((a, b) => a + b, 0)
+      io.emit('simulation:status', { status: 'started', speedLevel, vehicleCount, routeVehicleCounts, avgSpeed })
 
       // 启动 RSU 数据广播和算法周期重算
       cachingService.startBroadcast()

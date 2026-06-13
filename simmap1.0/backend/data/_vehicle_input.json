@@ -32,43 +32,43 @@
       "routeName": "古平岗→新庄",
       "E": 13,
       "X": 100,
-      "vehicleCount": 0
+      "vehicleCount": 10
     },
     {
       "routeId": 2,
       "routeName": "草场门→九华山",
       "E": 11,
       "X": 100,
-      "vehicleCount": 0
+      "vehicleCount": 10
     },
     {
       "routeId": 3,
       "routeName": "汉中门→西安门",
       "E": 8,
       "X": 100,
-      "vehicleCount": 0
+      "vehicleCount": 10
     },
     {
       "routeId": 4,
       "routeName": "古平岗→汉中门",
       "E": 7,
       "X": 100,
-      "vehicleCount": 0
+      "vehicleCount": 10
     },
     {
       "routeId": 5,
       "routeName": "新模范马路→新街口",
       "E": 8,
       "X": 100,
-      "vehicleCount": 0
+      "vehicleCount": 10
     },
     {
       "routeId": 6,
       "routeName": "新庄→西安门",
       "E": 7,
       "X": 100,
-      "vehicleCount": 0
+      "vehicleCount": 10
     }
   ],
-  "timestamp": "2026-06-12T19:48:47.903Z"
+  "timestamp": "2026-06-13T09:11:58.894Z"
 }

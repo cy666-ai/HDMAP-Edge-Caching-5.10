@@ -10,6 +10,13 @@ export const useVehicleStore = defineStore('vehicle', () => {
   const drivingStatus = ref('idle')
   // 速度等级 1-10
   const speedLevel = ref(5)
+  // 每条路线的目标车辆数，下一次启动时生效
+  // key: routeId (1-6), value: 车辆数 (1-10)
+  const routeVehicleCounts = ref({
+    1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5
+  })
+  // 车辆平均速度倍率 (0.5x - 3.0x)
+  const avgSpeed = ref(1.0)
   // 已行驶时间（秒）
   const elapsedTime = ref(0)
   // 模拟时间间隔定时器
@@ -20,6 +27,11 @@ export const useVehicleStore = defineStore('vehicle', () => {
   )
 
   const vehicleCount = computed(() => vehicles.value.length)
+
+  // 目标总车辆数（各路线之和）
+  const targetVehicleCount = computed(() =>
+    Object.values(routeVehicleCounts.value).reduce((a, b) => a + b, 0)
+  )
 
   function updateVehicles(data) {
     vehicles.value = data.map(v => ({
@@ -83,6 +95,17 @@ export const useVehicleStore = defineStore('vehicle', () => {
     speedLevel.value = Math.max(1, Math.min(10, level))
   }
 
+  function setRouteVehicleCount(routeId, count) {
+    routeVehicleCounts.value = {
+      ...routeVehicleCounts.value,
+      [routeId]: Math.max(1, Math.min(10, count))
+    }
+  }
+
+  function setAvgSpeed(speed) {
+    avgSpeed.value = Math.max(0.5, Math.min(3.0, +speed.toFixed(1)))
+  }
+
   function startTimer() {
     stopTimer()
     drivingStatus.value = 'running'
@@ -121,6 +144,9 @@ export const useVehicleStore = defineStore('vehicle', () => {
     selectedVehicleId,
     drivingStatus,
     speedLevel,
+    routeVehicleCounts,
+    targetVehicleCount,
+    avgSpeed,
     elapsedTime,
     selectedVehicle,
     vehicleCount,
@@ -130,6 +156,8 @@ export const useVehicleStore = defineStore('vehicle', () => {
     setSelectedVehicle,
     setDrivingStatus,
     setSpeedLevel,
+    setRouteVehicleCount,
+    setAvgSpeed,
     startTimer,
     stopTimer,
     reset,
