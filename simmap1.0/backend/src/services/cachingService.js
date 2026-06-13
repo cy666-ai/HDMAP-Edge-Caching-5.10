@@ -9,7 +9,7 @@
  * 5. 通过 WebSocket 广播 RSU 数据和命中率
  */
 
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -17,6 +17,26 @@ import { computeRSUDeployment } from '../utils/rsuDeployment.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.resolve(__dirname, '../../data')
+
+// 解析 Python 可执行文件绝对路径，避免 PATH 中混入 Windows Store 存根或多个 Python 版本
+// 导致 DLL 加载失败 (STATUS_DLL_INIT_FAILED / 0xC0000142)
+function resolvePythonPath() {
+  try {
+    const out = execSync('where python 2>nul', { encoding: 'utf8', windowsHide: true })
+    const lines = out.trim().split(/\r?\n/)
+    for (const p of lines) {
+      const trimmed = p.trim()
+      // 跳过 WindowsApps (Windows Store 存根) 和 Python314 (非项目所用版本)
+      if (trimmed && !trimmed.includes('WindowsApps') && !trimmed.includes('Python314')) {
+        return trimmed
+      }
+    }
+    return 'python'
+  } catch {
+    return 'python'
+  }
+}
+const PYTHON_EXECUTABLE = resolvePythonPath()
 
 // 算法参数（与 MATLAB 默认值一致）
 const ALGO_PARAMS = {
@@ -477,7 +497,7 @@ export class CachingService {
 
       console.log(`[Caching] 启动 Python 算法: ${scriptPath}`)
 
-      const child = spawn('python', [
+      const child = spawn(PYTHON_EXECUTABLE, [
         scriptPath,
       ], {
         cwd: algoDir,
@@ -572,7 +592,7 @@ export class CachingService {
 
       console.log(`[Caching] 启动对比分析脚本: ${scriptPath}`)
 
-      const child = spawn('python', [scriptPath], {
+      const child = spawn(PYTHON_EXECUTABLE, [scriptPath], {
         cwd: algoDir,
         timeout: 180000,
         stdio: ['ignore', 'pipe', 'pipe'],
