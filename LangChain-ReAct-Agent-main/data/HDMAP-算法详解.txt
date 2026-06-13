@@ -1,0 +1,78 @@
+================================================================================
+HDMAP 边缘缓存系统 — MWC 算法详解
+================================================================================
+
+## 算法概述
+MWC (Maximum Weight Closure) 最大权重闭包算法是本系统的核心缓存优化算法。
+通过将瓦片缓存决策问题转化为有向图的最大权重闭包问题，使用最小割/最大流
+算法求解每个 RSU 的最优缓存瓦片集合。
+
+## 7 阶段流水线 (hm_export_cache_decision.py)
+每次算法执行按以下顺序处理每条路线：
+
+### Stage 1: 概率分布 (probability_distribution.py)
+- 使用 Poisson 分布建模瓦片请求的到达率
+- 结合 Power-law 分布建模热门瓦片的请求偏斜
+- BATCH_SIZE=3：每 3 个 RSU 重置一次概率分布，防止概率沿长路径过度扩散
+- 输出：每块瓦片的请求概率 psi
+
+### Stage 2: 依赖图构建
+- 分析地图瓦片之间的引用依赖关系
+- 有向边表示依赖关系（瓦片 A 引用了瓦片 B）
+- 构建有向无环图 (DAG) 作为 MWC 的输入图结构
+
+### Stage 3: 效用计算
+- 综合请求概率、瓦片大小、传输成本计算每块瓦片的净效用 W_net
+- W_net = 收益（命中时节省的传输成本） - 成本（缓存占用的存储成本）
+- alpha = 0.055：成本惩罚系数
+
+### Stage 4: MWC 图构造
+- 将依赖 DAG 转换为最大流网络
+- 正效用节点连接源点 (Source)
+- 负效用节点连接汇点 (Sink)
+- 依赖边保持原有权重
+
+### Stage 5: MWC 求解 (hm_mwc_solver.py)
+- 使用 networkx 库的 minimum_cut 算法
+- 计算从源点到汇点的最大流（等价于最小割）
+- 最小割将节点分为两组：选入缓存 / 不选入
+- 选入缓存的节点集即最优缓存决策
+
+### Stage 6: 容量优化 (capacity_refinement_multi_rsu.py)
+- 对 MWC 输出应用 Capacity_Scale=2.0 倍增
+- 按 RSU 容量约束 (100 tiles) 筛选最优瓦片
+- 检查依赖完整性，修复因容量限制导致的依赖断裂
+- 输出最终 CacheDecision（布尔数组）
+
+### Stage 7: 统计输出
+- 计算每 RSU 命中率 CHR_RSU[i]
+- 计算路线总命中率 CHR_Total
+- 记录 MaxNetUtility_MWC 和 MaxNetUtility_Final
+- 写入 cache_decision.json 供 Node.js 后端读取
+
+## 关键数据结构
+输入 (_vehicle_input.json):
+{
+  "algorithmParams": { "alpha": 0.055, "capacityScale": 2.0, "batchSize": 3 },
+  "routes": [{ "routeId": 1, "E": [...], "X": [...], "vehicleCount": 5 }, ...]
+}
+
+输出 (cache_decision.json):
+{
+  "routeId": {
+    "CacheDecision": [true, false, true, ...],  // 每 RSU 的缓存决策
+    "psi": [0.1, 0.05, 0.3, ...],               // 请求概率
+    "W_net": [1.5, -0.2, 2.1, ...],             // 净效用
+    "CHR_RSU": [0.85, 0.72, 0.91, ...],         // 每 RSU 命中率
+    "CHR_Total": 0.83,                          // 总命中率
+    "MaxNetUtility_MWC": 250.5,
+    "MaxNetUtility_Final": 245.3
+  }
+}
+
+## 对比算法
+系统支持 4 种基线算法用于对比分析：
+- MPC (Most Popular Caching)：缓存最热门的瓦片
+- MAP (Most Accessed Popularity)：基于访问频率缓存
+- TRWC (Time-Weighted Request Caching)：时间加权缓存
+- MAMAB (Multi-Armed Bandit Adaptive)：多臂老虎机自适应缓存

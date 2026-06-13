@@ -63,6 +63,9 @@
         <ComparisonPanel v-if="activeTab === 'comparison'" :rsuData="rsuData" :panelWidth="panelWidth" />
       </div>
     </div>
+
+    <!-- 聊天机器人 FAB + Drawer -->
+    <ChatWidget />
   </div>
 </template>
 
@@ -75,6 +78,7 @@ import RouteManager from '../components/RouteManager.vue'
 import DataDisplay from '../components/DataDisplay.vue'
 import StatisticsPanel from '../components/StatisticsPanel.vue'
 import ComparisonPanel from '../components/ComparisonPanel.vue'
+import ChatWidget from '../components/ChatWidget.vue'
 import { useVehicleStore } from '../stores/vehicleStore'
 import socketService from '../services/socket'
 

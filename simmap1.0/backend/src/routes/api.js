@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { Road, Vehicle, Trajectory } from '../models/index.js'
-import { getCachingService } from '../services/serviceRegistry.js'
+import { getCachingService, getChatService } from '../services/serviceRegistry.js'
 
 const router = Router()
 
@@ -71,6 +71,17 @@ router.get('/rsu', (req, res) => {
     res.json({ success: true, data: cs.getCurrentData() })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// 检查 AI 聊天 Agent 是否在线
+router.get('/chat/status', async (req, res) => {
+  try {
+    const chatService = getChatService()
+    const online = chatService ? await chatService.healthCheck() : false
+    res.json({ success: true, data: { online } })
+  } catch (err) {
+    res.json({ success: true, data: { online: false } })
   }
 })
 

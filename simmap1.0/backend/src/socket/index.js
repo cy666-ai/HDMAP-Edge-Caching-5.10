@@ -1,6 +1,8 @@
 import { SimulationService } from '../services/simulationService.js'
 import { CachingService } from '../services/cachingService.js'
-import { setCachingService } from '../services/serviceRegistry.js'
+import { ChatService } from '../services/chatService.js'
+import { setCachingService, setChatService } from '../services/serviceRegistry.js'
+import { setupChatHandlers } from './chatHandlers.js'
 import { loadRouteConfig, saveRouteConfig } from '../utils/routeConfig.js'
 import { fetchAmapRoute, saveRouteCache } from '../utils/amapRoute.js'
 import path from 'path'
@@ -27,6 +29,10 @@ export async function setupSocketHandlers(io) {
   cachingService = new CachingService(io, routeConfig)
   setCachingService(cachingService)
   simulationService.setCachingService(cachingService)
+
+  // 初始化 AI 聊天服务
+  const chatService = new ChatService(io)
+  setChatService(chatService)
 
   io.on('connection', (socket) => {
     console.log(`[Socket] 客户端已连接: ${socket.id}`)
@@ -274,5 +280,8 @@ export async function setupSocketHandlers(io) {
     socket.on('disconnect', () => {
       console.log(`[Socket] 客户端已断开: ${socket.id}`)
     })
+
+    // 聊天机器人事件
+    setupChatHandlers(io, socket, chatService)
   })
 }

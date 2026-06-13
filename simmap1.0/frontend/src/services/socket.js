@@ -55,6 +55,14 @@ class SocketService {
   emit(event, data) {
     this.socket?.emit(event, data)
   }
+
+  /** Returns the raw socket instance for advanced use (e.g. multi-listener events) */
+  getSocket() {
+    if (!this.socket) {
+      this.connect()
+    }
+    return this.socket
+  }
 }
 
 export default new SocketService()
