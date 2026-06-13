@@ -69,9 +69,9 @@ def function_mamab(E, X, Prob_Route, J_in=None, R_in=None):
     R_out : np.ndarray
         Updated reward estimates.
     """
-    T_step = 200
-    Cache_Capacity = 15
-    beta = 0.5
+    T_step = 800
+    Cache_Capacity = 30
+    beta = 0.8
 
     psi_matrix = _probability_distribution_internal(E, X)
 

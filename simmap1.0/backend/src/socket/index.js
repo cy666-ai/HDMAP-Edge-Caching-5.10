@@ -113,6 +113,13 @@ export async function setupSocketHandlers(io) {
       socket.emit('rsu:update', cachingService.getCurrentData())
     })
 
+    // 触发 5-算法对比分析
+    socket.on('comparison:run', async () => {
+      console.log(`[Socket] 收到对比分析指令 from ${socket.id}`)
+      const result = await cachingService.runComparison()
+      socket.emit('comparison:result', result)
+    })
+
     // ==================== 路线管理 ====================
 
     // 获取当前路线配置

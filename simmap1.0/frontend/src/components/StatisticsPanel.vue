@@ -16,15 +16,21 @@
     <template v-else>
       <!-- 1. 最大净效用 -->
       <div class="chart-section">
-        <div class="chart-title">最大净效用 (MaxNetUtility)</div>
+        <div class="chart-title">
+          最大净效用 (MaxNetUtility)
+          <el-button size="small" text :icon="Download" title="下载图表" @click="downloadChart(maxNetUtilChart, '最大净效用')" />
+        </div>
         <div ref="maxNetUtilChart" class="chart-container" style="height:220px"></div>
       </div>
 
       <div class="divider"></div>
 
       <!-- 2. 缓存利用率 -->
-      <div class="chart-section">
-        <div class="chart-title">缓存利用率</div>
+      <div class="chart-section" style="margin-top:12px">
+        <div class="chart-title">
+          缓存利用率
+          <el-button size="small" text :icon="Download" title="下载图表" @click="downloadChart(cacheUtilChart, '缓存利用率')" />
+        </div>
         <div ref="cacheUtilChart" class="chart-container" style="height:220px"></div>
       </div>
 
@@ -32,7 +38,11 @@
 
       <!-- 3. RSU 负载均衡度 -->
       <div class="chart-section">
-        <div class="chart-title">RSU 负载均衡度</div>
+        <div class="chart-title">
+          RSU 负载均衡度
+          <el-button size="small" text :icon="Download" title="下载仪表盘" @click="downloadChart(balanceGaugeChart, '负载均衡度仪表盘')" />
+          <el-button size="small" text :icon="Download" title="下载负载分布" @click="downloadChart(rsuBalanceBarChart, 'RSU负载分布')" style="margin-left:2px" />
+        </div>
         <div class="balance-score-row">
           <div class="balance-gauge" ref="balanceGaugeChart" style="width:120px;height:120px"></div>
           <div class="balance-info">
@@ -50,7 +60,10 @@
 
       <!-- 4. 累积命中率曲线 -->
       <div class="chart-section">
-        <div class="chart-title">累积命中率曲线</div>
+        <div class="chart-title">
+          累积命中率曲线
+          <el-button size="small" text :icon="Download" title="下载图表" @click="downloadChart(cumulativeHitChart, '累积命中率曲线')" />
+        </div>
         <div ref="cumulativeHitChart" class="chart-container" style="height:240px"></div>
       </div>
 
@@ -58,7 +71,10 @@
 
       <!-- 5. 长/短路线命中趋势 -->
       <div class="chart-section">
-        <div class="chart-title">路线长度 vs 命中率趋势</div>
+        <div class="chart-title">
+          路线长度 vs 命中率趋势
+          <el-button size="small" text :icon="Download" title="下载图表" @click="downloadChart(routeLengthChart, '路线长度vs命中率')" />
+        </div>
         <div ref="routeLengthChart" class="chart-container" style="height:220px"></div>
       </div>
 
@@ -66,7 +82,10 @@
 
       <!-- 6. 车辆密度 vs 命中率 -->
       <div class="chart-section">
-        <div class="chart-title">车辆密度 vs 命中率</div>
+        <div class="chart-title">
+          车辆密度 vs 命中率
+          <el-button size="small" text :icon="Download" title="下载图表" @click="downloadChart(densityHitChart, '车辆密度vs命中率')" />
+        </div>
         <div ref="densityHitChart" class="chart-container" style="height:220px"></div>
       </div>
     </template>
@@ -76,8 +95,23 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { DataAnalysis } from '@element-plus/icons-vue'
+import { DataAnalysis, Download } from '@element-plus/icons-vue'
 import { generateRouteColors } from '../utils/routeColors'
+
+// ========== 图表下载工具函数 ==========
+function downloadChart(domRef, filename) {
+  const dom = domRef.value || domRef
+  if (!dom) return
+  const instance = echarts.getInstanceByDom(dom)
+  if (!instance) return
+  const url = instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' })
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename + '.png'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
 
 const props = defineProps({
   data: {
@@ -305,7 +339,7 @@ function renderCacheUtilization() {
           缓存块: ${cachedCounts[i]} / ${maxTiles[i]}`
       },
     },
-    grid: { ...baseGrid, top: 4, bottom: 24, right: 8 },
+    grid: { ...baseGrid, top: 16, bottom: 24, right: 8 },
     xAxis: {
       type: 'category',
       data: names,
@@ -888,6 +922,18 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
   padding-left: 4px;
   border-left: 3px solid #409EFF;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chart-title .el-button {
+  font-size: 13px;
+  color: #909399;
+}
+
+.chart-title .el-button:hover {
+  color: #409EFF;
 }
 
 .chart-container {

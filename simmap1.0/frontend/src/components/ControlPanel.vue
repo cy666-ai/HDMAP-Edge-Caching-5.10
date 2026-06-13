@@ -76,6 +76,7 @@
               @update:model-value="(val) => setRouteVehicleCount(route.id, val)"
             />
             <el-slider
+              class="speed-slider"
               :model-value="routeSpeeds[route.id] ?? 35"
               :min="0"
               :max="90"
@@ -237,5 +238,14 @@ function resetDriving() {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 160px;
+}
+
+/* 绿色速度滑动条 */
+.speed-slider {
+  --el-slider-main-bg-color: #67C23A;
+  --el-slider-runway-bg-color: #e1f3d8;
+  --el-slider-stop-bg-color: #b3e19d;
+  --el-slider-button-wrapper-bg-color: #fff;
+  --el-slider-main-bg-color-hover: #85CE61;
 }
 </style>

@@ -126,6 +126,7 @@ export class CachingService {
 
     this.lastAlgorithmRun = null
     this.algorithmRunning = false
+    this.comparisonRunning = false
     this.algorithmError = null
     this.broadcastTimer = null
     this.matlabTimer = null
@@ -507,6 +508,89 @@ export class CachingService {
           resolve({
             success: false,
             error: `Python 算法退出码 ${code}: ${stderr || stdout.slice(-200)}`,
+          })
+        }
+      })
+
+      child.on('error', (err) => {
+        resolve({ success: false, error: err.message })
+      })
+    })
+  }
+
+  // ==================== 对比分析 ====================
+
+  /**
+   * 运行 5-算法对比分析（MWC + 4 benchmarks）
+   * 写入 _vehicle_input.json，启动 Python run_comparison.py，返回对比结果
+   */
+  async runComparison() {
+    if (this.comparisonRunning) {
+      return { success: false, error: '对比分析正在运行中，请稍后再试' }
+    }
+
+    this.comparisonRunning = true
+    console.log('[Caching] 触发 5-算法对比分析...')
+
+    try {
+      // 1. 写入输入 JSON
+      const input = this.buildAlgorithmInput()
+      const inputPath = path.join(DATA_DIR, '_vehicle_input.json')
+      fs.writeFileSync(inputPath, JSON.stringify(input, null, 2), 'utf-8')
+
+      // 2. 启动对比 Python 脚本
+      const result = await this.runComparisonProcess()
+
+      if (result.success) {
+        // 3. 加载对比结果
+        const outputPath = path.join(DATA_DIR, 'comparison_result.json')
+        if (fs.existsSync(outputPath)) {
+          const raw = fs.readFileSync(outputPath, 'utf-8')
+          const data = JSON.parse(raw)
+          console.log(`[Caching] 对比分析完成: ${data.routes?.length || 0} 条路线`)
+          return { success: true, data }
+        }
+        return { success: false, error: 'comparison_result.json 未生成' }
+      }
+
+      return { success: false, error: result.error }
+    } catch (err) {
+      console.error(`[Caching] 对比分析异常: ${err.message}`)
+      return { success: false, error: err.message }
+    } finally {
+      this.comparisonRunning = false
+    }
+  }
+
+  /**
+   * 执行对比分析 Python 子进程
+   */
+  runComparisonProcess() {
+    return new Promise((resolve) => {
+      const scriptPath = path.resolve(__dirname, '../../../../algorithm/run_comparison.py')
+      const algoDir = path.resolve(__dirname, '../../../../algorithm')
+
+      console.log(`[Caching] 启动对比分析脚本: ${scriptPath}`)
+
+      const child = spawn('python', [scriptPath], {
+        cwd: algoDir,
+        timeout: 180000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout.on('data', (data) => { stdout += data.toString() })
+      child.stderr.on('data', (data) => { stderr += data.toString() })
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve({ success: true, stdout, stderr })
+        } else {
+          resolve({
+            success: false,
+            error: `对比分析退出码 ${code}: ${stderr || stdout.slice(-200)}`,
           })
         }
       })

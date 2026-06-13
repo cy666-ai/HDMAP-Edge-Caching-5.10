@@ -47,11 +47,20 @@
             <el-icon :size="14"><DataAnalysis /></el-icon>
             <span>统计分析</span>
           </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'comparison' }"
+            @click="activeTab = 'comparison'"
+          >
+            <el-icon :size="14"><TrendCharts /></el-icon>
+            <span>对比分析</span>
+          </button>
         </div>
 
         <!-- 面板内容区 -->
         <DataDisplay v-if="activeTab === 'monitor'" :rsuData="rsuData" />
         <StatisticsPanel v-if="activeTab === 'statistics'" :data="rsuData" :panelWidth="panelWidth" />
+        <ComparisonPanel v-if="activeTab === 'comparison'" :rsuData="rsuData" :panelWidth="panelWidth" />
       </div>
     </div>
   </div>
@@ -59,12 +68,13 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Monitor, Aim, DataAnalysis } from '@element-plus/icons-vue'
+import { Monitor, Aim, DataAnalysis, TrendCharts } from '@element-plus/icons-vue'
 import MapView from '../components/MapView.vue'
 import ControlPanel from '../components/ControlPanel.vue'
 import RouteManager from '../components/RouteManager.vue'
 import DataDisplay from '../components/DataDisplay.vue'
 import StatisticsPanel from '../components/StatisticsPanel.vue'
+import ComparisonPanel from '../components/ComparisonPanel.vue'
 import { useVehicleStore } from '../stores/vehicleStore'
 import socketService from '../services/socket'
 
