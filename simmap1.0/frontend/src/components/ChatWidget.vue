@@ -12,18 +12,72 @@
     HLR-Cache助手
   </el-button>
 
-  <!-- Element Plus Drawer -->
+  <!-- Element Plus Drawer （可拖拽调整宽度） -->
   <el-drawer
     v-model="drawerVisible"
-    title="HLR-Cache助手"
     direction="ltr"
-    size="420px"
+    :size="drawerWidth + 'px'"
     :close-on-click-modal="false"
     :append-to-body="true"
     @open="onDrawerOpen"
     @closed="onDrawerClose"
   >
-    <div class="chat-container">
+    <template #title>
+      <div class="drawer-title-bar">
+        <span v-if="showHistory">📋 历史记录</span>
+        <span v-else>HLR-Cache助手</span>
+        <div class="title-actions">
+          <el-button
+            v-if="!showHistory"
+            size="small"
+            text
+            :icon="Plus"
+            @click="newConversation"
+          >新对话</el-button>
+          <el-button
+            size="small"
+            text
+            @click="toggleHistory"
+          >
+            {{ showHistory ? '← 返回' : '历史' }}
+          </el-button>
+        </div>
+      </div>
+    </template>
+
+    <!-- 历史记录面板 -->
+    <div v-if="showHistory" class="history-panel">
+      <div v-if="conversations.length === 0" class="history-empty">
+        <el-icon :size="40" color="#c0c4cc"><ChatLineSquare /></el-icon>
+        <p>暂无历史对话</p>
+      </div>
+      <div
+        v-for="conv in conversations"
+        :key="conv.id"
+        class="history-item"
+        :class="{ active: conv.id === activeConversationId }"
+        @click="switchConversation(conv.id)"
+      >
+        <div class="history-item-main">
+          <div class="history-title">{{ conv.title }}</div>
+          <div class="history-meta">
+            <span>{{ conv.messageCount }} 条消息</span>
+            <span>·</span>
+            <span>{{ formatConvTime(conv.updatedAt) }}</span>
+          </div>
+        </div>
+        <el-button
+          size="small"
+          text
+          type="danger"
+          :icon="Delete"
+          @click.stop="deleteConversation(conv.id)"
+        />
+      </div>
+    </div>
+
+    <!-- 聊天面板 -->
+    <div v-else class="chat-container">
       <!-- 消息列表 -->
       <div class="chat-messages" ref="messagesRef">
         <div v-if="messages.length === 0 && !streaming" class="chat-placeholder">
@@ -96,6 +150,12 @@
         </p>
       </div>
     </div>
+
+    <!-- 拖拽调整宽度的手柄（右边缘） -->
+    <div
+      class="resize-handle"
+      @mousedown="onResizeStart"
+    ></div>
   </el-drawer>
 </template>
 
@@ -103,22 +163,193 @@
 import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import {
   ChatDotRound, Service, User, Promotion, Close, CircleCheck, WarningFilled, Loading,
+  Plus, ChatLineSquare, Delete,
 } from '@element-plus/icons-vue'
 import socketService from '../services/socket'
 
-// ---- State ----
+// ==================== 常量 ====================
+const DRAWER_WIDTH_KEY = 'hlr_cache_drawer_width'
+const CONVERSATIONS_KEY = 'hlr_cache_conversations'
+const ACTIVE_CONV_KEY = 'hlr_cache_active_conv'
+const MIN_WIDTH = 320
+const MAX_WIDTH = 900
+const DEFAULT_WIDTH = 420
+
+// ==================== 状态 ====================
 const drawerVisible = ref(false)
 const inputText = ref('')
 const messages = ref([])
 const streamingContent = ref('')
 const streaming = ref(false)
 const messagesRef = ref(null)
-const agentOnline = ref(null)  // null = checking, true = online, false = offline
+const agentOnline = ref(null)
+const showHistory = ref(false)
+
+// 拖拽相关
+const drawerWidth = ref(Number(localStorage.getItem(DRAWER_WIDTH_KEY)) || DEFAULT_WIDTH)
+let isResizing = false
+
+// 对话历史
+const conversations = ref([])
+const activeConversationId = ref(null)
 
 let currentMessageId = null
 let healthCheckTimer = null
+let saveTimer = null
 
-// ---- Socket bindings ----
+// ==================== 对话持久化 ====================
+function generateId() {
+  return 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+}
+
+function loadConversations() {
+  try {
+    const raw = localStorage.getItem(CONVERSATIONS_KEY)
+    conversations.value = raw ? JSON.parse(raw) : []
+  } catch {
+    conversations.value = []
+  }
+}
+
+function persistConversations() {
+  try {
+    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations.value))
+  } catch (e) {
+    // localStorage 满或不可用
+    console.warn('[ChatWidget] Failed to persist conversations:', e)
+  }
+}
+
+function saveCurrentConversation() {
+  if (!activeConversationId.value || messages.value.length === 0) return
+  const idx = conversations.value.findIndex(c => c.id === activeConversationId.value)
+  if (idx === -1) return
+
+  const conv = conversations.value[idx]
+  conv.messages = messages.value.map(m => ({ role: m.role, content: m.content }))
+  conv.messageCount = messages.value.length
+  conv.updatedAt = Date.now()
+
+  // 用第一条用户消息作为标题
+  if (conv.title === '新对话') {
+    const firstUser = messages.value.find(m => m.role === 'user')
+    if (firstUser) {
+      const text = firstUser.content.trim()
+      conv.title = text.length > 30 ? text.slice(0, 30) + '…' : text
+    }
+  }
+
+  persistConversations()
+}
+
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveCurrentConversation()
+  }, 500)
+}
+
+function newConversation() {
+  // 保存当前对话
+  saveCurrentConversation()
+  showHistory.value = false
+
+  // 创建新对话
+  const id = generateId()
+  activeConversationId.value = id
+  messages.value = []
+  streamingContent.value = ''
+  streaming.value = false
+
+  conversations.value.unshift({
+    id,
+    title: '新对话',
+    messages: [],
+    messageCount: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  })
+  persistConversations()
+  localStorage.setItem(ACTIVE_CONV_KEY, id)
+}
+
+function switchConversation(id) {
+  if (id === activeConversationId.value && !showHistory.value) return
+  saveCurrentConversation()
+
+  const conv = conversations.value.find(c => c.id === id)
+  if (!conv) return
+
+  activeConversationId.value = id
+  messages.value = (conv.messages || []).map(m => ({ ...m }))
+  streamingContent.value = ''
+  streaming.value = false
+  showHistory.value = false
+  localStorage.setItem(ACTIVE_CONV_KEY, id)
+}
+
+function deleteConversation(id) {
+  const idx = conversations.value.findIndex(c => c.id === id)
+  if (idx === -1) return
+  conversations.value.splice(idx, 1)
+  persistConversations()
+
+  // 如果删的是当前对话，切换到最新对话或新建
+  if (id === activeConversationId.value) {
+    if (conversations.value.length > 0) {
+      switchConversation(conversations.value[0].id)
+    } else {
+      newConversation()
+    }
+  }
+}
+
+function toggleHistory() {
+  if (showHistory.value) {
+    showHistory.value = false
+  } else {
+    saveCurrentConversation()
+    showHistory.value = true
+  }
+}
+
+function formatConvTime(ts) {
+  if (!ts) return ''
+  const now = Date.now()
+  const diff = now - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3600_000) return Math.floor(diff / 60_000) + ' 分钟前'
+  if (diff < 86400_000) return Math.floor(diff / 3600_000) + ' 小时前'
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ==================== 拖拽调整宽度 ====================
+function onResizeStart(e) {
+  isResizing = true
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', onResizeEnd)
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'ew-resize'
+  e.preventDefault()
+}
+
+function onResizeMove(e) {
+  if (!isResizing) return
+  const w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, e.clientX))
+  drawerWidth.value = w
+}
+
+function onResizeEnd() {
+  isResizing = false
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+  localStorage.setItem(DRAWER_WIDTH_KEY, drawerWidth.value)
+}
+
+// ==================== Socket ====================
 const socket = socketService.getSocket()
 
 function bindSocket() {
@@ -131,6 +362,7 @@ function bindSocket() {
     if (error) {
       streaming.value = false
       messages.value.push({ role: 'assistant', content })
+      scheduleSave()
       return
     }
 
@@ -141,6 +373,7 @@ function bindSocket() {
       }
       streamingContent.value = ''
       currentMessageId = null
+      scheduleSave()
       return
     }
 
@@ -156,24 +389,23 @@ function bindSocket() {
       role: 'assistant',
       content: `⚠️ ${payload.message || '连接 AI 助手失败'}`,
     })
+    scheduleSave()
   })
 }
 
-// ---- Methods ----
+// ==================== 方法 ====================
 function openChat() {
   drawerVisible.value = true
 }
 
 function onDrawerOpen() {
-  // Check agent status immediately, then poll every 30s
   checkAgentStatus()
   healthCheckTimer = setInterval(checkAgentStatus, 30000)
-  // Bind socket events
   bindSocket()
 }
 
 function onDrawerClose() {
-  // Stop periodic health checks
+  saveCurrentConversation()
   if (healthCheckTimer) {
     clearInterval(healthCheckTimer)
     healthCheckTimer = null
@@ -186,6 +418,7 @@ function sendMessage() {
 
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
+  scheduleSave()
 
   // Show thinking indicator immediately
   streaming.value = true
@@ -208,6 +441,7 @@ function stopGeneration() {
   streaming.value = false
   streamingContent.value = ''
   currentMessageId = null
+  scheduleSave()
 }
 
 async function checkAgentStatus() {
@@ -217,7 +451,6 @@ async function checkAgentStatus() {
       ? `${protocol}//${hostname}:3000`
       : window.location.origin
 
-    // Retry once on transient failures
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const resp = await fetch(`${apiBase}/api/chat/status`, {
@@ -228,7 +461,7 @@ async function checkAgentStatus() {
         return
       } catch {
         if (attempt === 0) {
-          await new Promise(r => setTimeout(r, 2000))  // wait 2s before retry
+          await new Promise(r => setTimeout(r, 2000))
         }
       }
     }
@@ -238,7 +471,7 @@ async function checkAgentStatus() {
   }
 }
 
-// ---- Auto-scroll ----
+// ==================== 自动滚动 ====================
 watch([streamingContent, messages], async () => {
   await nextTick()
   if (messagesRef.value) {
@@ -246,11 +479,42 @@ watch([streamingContent, messages], async () => {
   }
 })
 
-// ---- Cleanup ----
+// ==================== 初始化 ====================
+loadConversations()
+const savedActiveId = localStorage.getItem(ACTIVE_CONV_KEY)
+if (savedActiveId && conversations.value.find(c => c.id === savedActiveId)) {
+  activeConversationId.value = savedActiveId
+  const conv = conversations.value.find(c => c.id === savedActiveId)
+  messages.value = (conv.messages || []).map(m => ({ ...m }))
+} else if (conversations.value.length > 0) {
+  activeConversationId.value = conversations.value[0].id
+  messages.value = (conversations.value[0].messages || []).map(m => ({ ...m }))
+} else {
+  // 创建首个对话
+  const id = generateId()
+  activeConversationId.value = id
+  conversations.value.push({
+    id,
+    title: '新对话',
+    messages: [],
+    messageCount: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  })
+  persistConversations()
+  localStorage.setItem(ACTIVE_CONV_KEY, id)
+}
+
+// ==================== 清理 ====================
 onBeforeUnmount(() => {
+  saveCurrentConversation()
   if (healthCheckTimer) {
     clearInterval(healthCheckTimer)
     healthCheckTimer = null
+  }
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
   }
 })
 </script>
@@ -272,6 +536,96 @@ onBeforeUnmount(() => {
 .chat-fab:hover {
   transform: scale(1.06);
   box-shadow: 0 6px 20px rgba(64, 158, 255, 0.7);
+}
+
+/* 标题栏 */
+.drawer-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.title-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 拖拽手柄 */
+.resize-handle {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 80px;
+  cursor: ew-resize;
+  z-index: 10;
+  border-radius: 3px 0 0 3px;
+  background: #dcdfe6;
+  opacity: 0;
+  transition: opacity 0.25s, background 0.2s;
+}
+:deep(.el-drawer:hover) .resize-handle,
+:deep(.el-drawer__body:hover) .resize-handle,
+.resize-handle:hover {
+  opacity: 0.7;
+}
+.resize-handle:hover {
+  opacity: 1 !important;
+  background: #409eff;
+}
+
+/* 历史记录面板 */
+.history-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.history-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #c0c4cc;
+}
+.history-empty p {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  margin: 2px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.history-item:hover {
+  background: #f0f2f5;
+}
+.history-item.active {
+  background: #ecf5ff;
+}
+.history-item-main {
+  flex: 1;
+  min-width: 0;
+  margin-right: 8px;
+}
+.history-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.history-meta {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  display: flex;
+  gap: 6px;
 }
 
 /* Chat layout */

@@ -1,18 +1,49 @@
-步骤 1 — 生成输入文件（可选，后端启动后会自动生成）：
+步骤 1 — 启动 Python ReAct Agent（AI 聊天服务）：
 
-cd "simmap1.0/backend"
-node scripts/generateMatlabInput.js
+cd "LangChain-ReAct-Agent-main"
+set DASHSCOPE_API_KEY=你的百炼API密钥
+python agent_server.py
+:: → http://localhost:8000  (SSE 流式聊天 + /health 健康检查)
 
-步骤 2 — 运行 Python 算法生成缓存决策：
-cd "algorithm"
-python hm_export_cache_decision.py
+步骤 2 — 启动 Node.js 后端：
 
-步骤 3 — 启动后端和前端（与之前一样）：
 cd "simmap1.0/backend"
 npm run dev
+:: → http://localhost:3000
+
+步骤 3 — 启动 Vue 前端：
+
 cd "simmap1.0/frontend"
 npm run dev
+:: → http://localhost:5173
 
-步骤 4 — 打开浏览器，点击"开始行驶"，即可在地图上看到RSU 标记点和实时的命中率面板。
+步骤 4 — 打开浏览器访问 http://localhost:5173：
 
-注意：后端会在每 5 个时间片自动触发 Python 算法重算，无需手动执行步骤 2。
+- 点击「开始模拟」启动车辆模拟，地图上显示 RSU 标记和实时命中率面板
+- 点击左下角「HLR-Cache助手」打开 AI 聊天抽屉，可询问系统架构、算法原理、前端界面等问题
+- 后端每 5 tick 自动触发 Python MWC 算法重算缓存决策
+
+============ 初次部署须知 ============
+
+无需手动运行 Python 算法。后端启动后每 5 tick 自动生成 _vehicle_input.json
+并调用 python hm_export_cache_decision.py，前端面板自动更新缓存数据。
+
+如需在启动系统前验证算法环境是否正常（冒烟测试），按以下顺序执行：
+
+  # 1. 先生成输入文件（模拟后端写出的数据）
+  cd "simmap1.0/backend"
+  node scripts/generateMatlabInput.js
+
+  # 2. 运行算法，检查是否正常输出 cache_decision.json
+  cd "../algorithm"
+  python hm_export_cache_decision.py
+
+如果报错，通常是 Python 依赖未安装：
+  pip install -r requirements.txt
+
+============ 环境要求 ============
+
+- Python 3.10+（算法 + AI Agent 共用，需分别 pip install -r requirements.txt）
+- Node.js 18+
+- 阿里云百炼 DashScope API Key（用于 AI 聊天，可选，不影响模拟核心功能）
+- 高德地图 API Key（在 simmap1.0/frontend/.env 中配置，用于地图显示和路径规划）
