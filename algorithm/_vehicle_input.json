@@ -1,0 +1,56 @@
+{
+  "algorithmParams": {
+    "alpha": 0.055,
+    "Capacity_Scale": 2.0,
+    "allowed_layers_per_block": [
+      3,
+      4,
+      4
+    ],
+    "layer_profit_ranges": {
+      "Raw": [
+        25,
+        35
+      ],
+      "Geo": [
+        15,
+        25
+      ],
+      "Sem": [
+        8,
+        15
+      ],
+      "Dyn": [
+        -5,
+        5
+      ]
+    }
+  },
+  "routes": [
+    {
+      "routeId": 1,
+      "routeName": "test-18kmh",
+      "E": 13,
+      "X": 100,
+      "vehicleCount": 5,
+      "speedKmh": 18
+    },
+    {
+      "routeId": 2,
+      "routeName": "test-36kmh",
+      "E": 13,
+      "X": 100,
+      "vehicleCount": 5,
+      "speedKmh": 36
+    },
+    {
+      "routeId": 3,
+      "routeName": "test-72kmh",
+      "E": 13,
+      "X": 100,
+      "vehicleCount": 5,
+      "speedKmh": 72
+    }
+  ],
+  "timestamp": "test"
+}

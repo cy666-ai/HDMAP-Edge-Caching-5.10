@@ -64,34 +64,28 @@
         <div v-for="route in routeDefs" :key="route.id" class="route-row">
           <div class="control-label">
             <span class="route-name">{{ route.name }}</span>
-            <span class="speed-value">{{ routeVehicleCounts[route.id] }} 辆</span>
+            <span class="speed-value">{{ routeVehicleCounts[route.id] }} 辆 · {{ routeSpeeds[route.id] || 35 }} km/h</span>
           </div>
-          <el-slider
-            :model-value="routeVehicleCounts[route.id]"
-            :min="1"
-            :max="10"
-            :step="1"
-            size="small"
-            @update:model-value="(val) => setRouteVehicleCount(route.id, val)"
-          />
+          <div class="route-sliders">
+            <el-slider
+              :model-value="routeVehicleCounts[route.id]"
+              :min="1"
+              :max="10"
+              :step="1"
+              size="small"
+              @update:model-value="(val) => setRouteVehicleCount(route.id, val)"
+            />
+            <el-slider
+              :model-value="routeSpeeds[route.id] ?? 35"
+              :min="0"
+              :max="90"
+              :step="5"
+              size="small"
+              @update:model-value="(val) => setRouteSpeed(route.id, val)"
+            />
+          </div>
         </div>
       </template>
-    </div>
-
-    <div class="speed-control">
-      <div class="control-label">
-        <span>平均速度</span>
-        <span class="speed-value">{{ avgSpeed }}x</span>
-      </div>
-      <el-slider
-        v-model="avgSpeed"
-        :min="0.5"
-        :max="3.0"
-        :step="0.1"
-        :show-stops="true"
-        :marks="avgSpeedMarks"
-        size="small"
-      />
     </div>
 
   </div>
@@ -107,15 +101,8 @@ const vehicleStore = useVehicleStore()
 
 const showRouteConfig = ref(false)
 
-// 6条固定路线定义
-const routeDefs = [
-  { id: 1, name: '古平岗→新庄' },
-  { id: 2, name: '草场门→九华山' },
-  { id: 3, name: '汉中门→西安门' },
-  { id: 4, name: '古平岗→汉中门' },
-  { id: 5, name: '新模范马路→新街口' },
-  { id: 6, name: '新庄→西安门' },
-]
+// 动态路线定义（从 store 获取，后端同步）
+const routeDefs = computed(() => vehicleStore.routeConfig)
 
 const drivingStatus = computed(() => vehicleStore.drivingStatus)
 
@@ -128,23 +115,16 @@ const targetVehicleCount = computed(() => vehicleStore.targetVehicleCount)
 
 const routeVehicleCounts = computed(() => vehicleStore.routeVehicleCounts)
 
+const routeSpeeds = computed(() => vehicleStore.routeSpeeds)
+
 const setRouteVehicleCount = (routeId, count) => vehicleStore.setRouteVehicleCount(routeId, count)
 
-const avgSpeed = computed({
-  get: () => vehicleStore.avgSpeed,
-  set: (val) => vehicleStore.setAvgSpeed(val)
-})
+const setRouteSpeed = (routeId, speedKmh) => vehicleStore.setRouteSpeed(routeId, speedKmh)
 
 const speedMarks = {
   1: '1',
   5: '5',
   10: '10'
-}
-
-const avgSpeedMarks = {
-  0.5: '0.5x',
-  1.0: '1x',
-  3.0: '3x'
 }
 
 const statusTagType = computed(() => {
@@ -162,10 +142,13 @@ function startDriving() {
     socketService.emit('simulation:start', {
       speedLevel: speedLevel.value,
       routeVehicleCounts: routeVehicleCounts.value,
-      avgSpeed: avgSpeed.value
+      routeSpeeds: routeSpeeds.value
     })
   } else if (drivingStatus.value === 'paused') {
-    socketService.emit('simulation:resume')
+    socketService.emit('simulation:resume', {
+      routeVehicleCounts: routeVehicleCounts.value,
+      routeSpeeds: routeSpeeds.value
+    })
     vehicleStore.resume()
   }
 }
@@ -239,6 +222,12 @@ function resetDriving() {
 .route-row {
   margin-bottom: 12px;
   padding-left: 4px;
+}
+
+.route-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .route-name {

@@ -2,7 +2,7 @@
  * CachingService - RSU 缓存命中率实时计算服务 (v5.10)
  *
  * 职责:
- * 1. 按路线（6条）管理 RSU 数据和车辆分布
+ * 1. 按路线管理 RSU 数据和车辆分布
  * 2. 每 5 个时间片触发 Python 执行 MWC 算法（每条路线单独计算）
  * 3. 加载 Python 输出的每路线 CacheDecision（各 RSU 缓存哪些内容块）
  * 4. 每当车辆进入 RSU 覆盖范围时，对比 RSU 缓存内容与车辆需求计算命中率
@@ -20,14 +20,14 @@ const DATA_DIR = path.resolve(__dirname, '../../data')
 
 // 算法参数（与 MATLAB 默认值一致）
 const ALGO_PARAMS = {
-  alpha: 0.055,
+  alpha: 0.048,
   Capacity_Scale: 2.0,
   allowed_layers_per_block: [3, 4, 4],
   layer_profit_ranges: {
     Raw: [25, 35],
     Geo: [15, 25],
     Sem: [8, 15],
-    Dyn: [-5, 5],
+    Dyn: [-3, 5],
   },
 }
 
@@ -39,16 +39,6 @@ const RSU_PROXIMITY_M = 300
 
 // 算法重算间隔（时间片数）
 const ALGO_INTERVAL_TICKS = 5
-
-// 6 条车辆路线定义
-const ROUTE_DEFS = [
-  { id: 1, name: '古平岗→新庄' },
-  { id: 2, name: '草场门→九华山' },
-  { id: 3, name: '汉中门→西安门' },
-  { id: 4, name: '古平岗→汉中门' },
-  { id: 5, name: '新模范马路→新街口' },
-  { id: 6, name: '新庄→西安门' },
-]
 
 /**
  * Haversine 距离计算（米）
@@ -64,17 +54,30 @@ function haversineDist(lat1, lng1, lat2, lng2) {
 }
 
 export class CachingService {
-  constructor(io) {
+  constructor(io, routeConfig) {
     this.io = io
 
-    // 动态加载 RSU 部署数据（每个 RSU 已有 routeId 字段）
-    const deployment = computeRSUDeployment()
+    // 路线配置（唯一数据源）
+    this.routeConfig = routeConfig || { routes: [], defaultVehicleCount: 5 }
+
+    // 每条路线的独立速度 (km/h)，默认 35，由 SimulationService 同步更新
+    this.routeSpeeds = {}
+
+    // 动态加载 RSU 部署数据（传入路线数据）
+    const deployment = computeRSUDeployment(this.routeConfig.routes)
     this.rsuPositions = deployment.intersections
 
-    // ========== 6 条路线数据模型 ==========
+    // ========== 路线数据模型 ==========
     // 每条路线维护自己的 RSU 列表和缓存决策
+    this._buildRouteData()
+  }
+
+  /**
+   * 从路线配置构建路线数据
+   */
+  _buildRouteData() {
     this.routeData = {}
-    for (const def of ROUTE_DEFS) {
+    for (const def of this.routeConfig.routes) {
       this.routeData[def.id] = {
         routeId: def.id,
         name: def.name,
@@ -112,14 +115,13 @@ export class CachingService {
     this.totalHitRate = 0
 
     // 累积命中率历史（用于前端绘制时间序列曲线）
-    this.hitRateHistory = []  // [{ tick, totalHitRate, routes: {routeId: hitRate} }]
-    this.maxHistoryLength = 200  // 最多保留 200 个采样点
+    this.hitRateHistory = []
+    this.maxHistoryLength = 200
 
-    // 累积最大净效用历史（用于前端绘制时间片变化曲线）
-    this.maxNetUtilityHistory = []  // [{ tick, routes: {routeId: maxNetUtilityFinal} }]
+    // 累积最大净效用历史
+    this.maxNetUtilityHistory = []
 
     // 每辆车的 tile 收集状态
-    // vehicleId → { visitedRSUs: Set<rsuIndex>, collectedTiles: Set<tileId>, routeId: number }
     this.vehicleTileState = new Map()
 
     this.lastAlgorithmRun = null
@@ -132,6 +134,34 @@ export class CachingService {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true })
     }
+  }
+
+  /**
+   * 路线变更后重新初始化
+   * @param {Object} newRouteConfig - 新的路线配置
+   */
+  reinitialize(newRouteConfig) {
+    this.stop()
+    if (newRouteConfig) this.routeConfig = newRouteConfig
+
+    // 清空运行时状态
+    this.vehicleTileState.clear()
+    this.tickCount = 0
+    this.lastActiveTick = 0
+    this.totalHitRate = 0
+    this.hitRateHistory = []
+    this.maxNetUtilityHistory = []
+    this.algorithmError = null
+    this.lastAlgorithmRun = null
+
+    // 重新计算 RSU 部署
+    const deployment = computeRSUDeployment(this.routeConfig.routes)
+    this.rsuPositions = deployment.intersections
+
+    // 重建路线数据
+    this._buildRouteData()
+
+    console.log(`[Caching] 已重新初始化，路线数: ${this.routeConfig.routes.length}`)
   }
 
   // ==================== 每 Tick 调用 ====================
@@ -343,7 +373,15 @@ export class CachingService {
   // ==================== 算法触发（Python） ====================
 
   /**
-   * 构建算法输入数据（每条路线独立参数）
+   * 设置各路线速度（由 SimulationService 在启动/恢复时同步）
+   * @param {Object} speeds - { [routeId]: kmh }
+   */
+  setRouteSpeeds(speeds) {
+    this.routeSpeeds = speeds || {}
+  }
+
+  /**
+   * 构建算法输入数据（每条路线独立参数，含速度）
    */
   buildAlgorithmInput() {
     return {
@@ -356,6 +394,7 @@ export class CachingService {
           E: r.E,
           X: r.X,
           vehicleCount: r.vehicleCount,
+          speedKmh: this.routeSpeeds[r.routeId] ?? 35,
         })),
       timestamp: new Date().toISOString(),
     }

@@ -18,8 +18,8 @@ const io = new Server(httpServer, {
 // 初始化数据库
 await initDatabase()
 
-// 配置WebSocket
-setupSocketHandlers(io)
+// 配置WebSocket（异步：需等待高德API路径加载完成后才初始化车辆）
+await setupSocketHandlers(io)
 
 httpServer.listen(PORT, () => {
   console.log(`[Server] 后端服务已启动: http://localhost:${PORT}`)

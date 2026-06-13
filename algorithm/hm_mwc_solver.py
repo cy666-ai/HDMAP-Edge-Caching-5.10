@@ -46,6 +46,12 @@ def hm_mwc_solver(W_net, dependency_matrix):
     S_node = num_tiles       # source node ID (0-indexed)
     T_node = num_tiles + 1   # sink node ID (0-indexed)
 
+    # ---- Early return: all weights positive → select everything ----
+    if np.all(W_net > 0):
+        B_MWC = np.ones(num_tiles, dtype=bool)
+        MaxUtility = float(np.sum(W_net))
+        return B_MWC, MaxUtility
+
     G = nx.DiGraph()
     total_positive_weight = 0.0
 

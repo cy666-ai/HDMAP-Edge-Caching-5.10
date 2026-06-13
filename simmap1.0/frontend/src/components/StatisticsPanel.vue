@@ -77,6 +77,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { DataAnalysis } from '@element-plus/icons-vue'
+import { generateRouteColors } from '../utils/routeColors'
 
 const props = defineProps({
   data: {
@@ -129,14 +130,14 @@ watch(() => props.data?.routes, (newRoutes) => {
   }
 }, { deep: true, immediate: true })
 
-// 路线颜色
-const ROUTE_COLORS = {
-  1: '#409EFF', 2: '#E6A23C', 3: '#67C23A',
-  4: '#F56C6C', 5: '#B37FEB', 6: '#36CFC9',
-}
+// 路线颜色（从后端数据动态计算）
+const routeColorMap = computed(() => {
+  const ids = (props.data?.routes || []).map(r => r.id)
+  return generateRouteColors(ids)
+})
 
 function routeColor(id) {
-  return ROUTE_COLORS[id] || '#909399'
+  return routeColorMap.value[id]?.body || '#909399'
 }
 
 // ========== 均衡度描述（颜色与仪表盘4段色域一致） ==========

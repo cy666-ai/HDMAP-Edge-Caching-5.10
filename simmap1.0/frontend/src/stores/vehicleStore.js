@@ -10,13 +10,16 @@ export const useVehicleStore = defineStore('vehicle', () => {
   const drivingStatus = ref('idle')
   // 速度等级 1-10
   const speedLevel = ref(5)
+  // 当前路线配置列表（从后端获取）
+  const routeConfig = ref([])
   // 每条路线的目标车辆数，下一次启动时生效
-  // key: routeId (1-6), value: 车辆数 (1-10)
-  const routeVehicleCounts = ref({
-    1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5
-  })
-  // 车辆平均速度倍率 (0.5x - 3.0x)
-  const avgSpeed = ref(1.0)
+  const routeVehicleCounts = ref({})
+  // 每条路线独立速度 (km/h)，范围 0-90，默认 35
+  const routeSpeeds = ref({})
+  // 地图选点状态: null | 'start' | 'end'
+  const mapPickMode = ref(null)
+  // 地图选点结果: { lat, lng, target }  — target 为 'start' 或 'end'
+  const mapPickedCoord = ref(null)
   // 已行驶时间（秒）
   const elapsedTime = ref(0)
   // 模拟时间间隔定时器
@@ -95,6 +98,35 @@ export const useVehicleStore = defineStore('vehicle', () => {
     speedLevel.value = Math.max(1, Math.min(10, level))
   }
 
+  function setRouteConfig(routes) {
+    routeConfig.value = routes || []
+  }
+
+  /**
+   * 初始化路线车辆计数
+   */
+  function initRouteVehicleCounts(routeIds, defaultCount = 5) {
+    routeVehicleCounts.value = Object.fromEntries(
+      (routeIds || []).map(id => [id, defaultCount])
+    )
+  }
+
+  /**
+   * 向车辆计数对象中添加新路线
+   */
+  function addRouteToCounts(routeId, count = 5) {
+    setRouteVehicleCount(routeId, count)
+  }
+
+  /**
+   * 从车辆计数对象中移除路线
+   */
+  function removeRouteFromCounts(routeId) {
+    const newCounts = { ...routeVehicleCounts.value }
+    delete newCounts[routeId]
+    routeVehicleCounts.value = newCounts
+  }
+
   function setRouteVehicleCount(routeId, count) {
     routeVehicleCounts.value = {
       ...routeVehicleCounts.value,
@@ -102,8 +134,27 @@ export const useVehicleStore = defineStore('vehicle', () => {
     }
   }
 
-  function setAvgSpeed(speed) {
-    avgSpeed.value = Math.max(0.5, Math.min(3.0, +speed.toFixed(1)))
+  function setRouteSpeed(routeId, speedKmh) {
+    routeSpeeds.value = {
+      ...routeSpeeds.value,
+      [routeId]: Math.max(0, Math.min(90, Math.round(speedKmh)))
+    }
+  }
+
+  function initRouteSpeeds(routeIds, defaultSpeed = 35) {
+    routeSpeeds.value = Object.fromEntries(
+      (routeIds || []).map(id => [id, defaultSpeed])
+    )
+  }
+
+  function addRouteSpeed(routeId, speed = 35) {
+    setRouteSpeed(routeId, speed)
+  }
+
+  function removeRouteSpeed(routeId) {
+    const newSpeeds = { ...routeSpeeds.value }
+    delete newSpeeds[routeId]
+    routeSpeeds.value = newSpeeds
   }
 
   function startTimer() {
@@ -139,14 +190,29 @@ export const useVehicleStore = defineStore('vehicle', () => {
     startTimer()
   }
 
+  // 地图选点
+  function activateMapPick(target) {
+    mapPickMode.value = target
+    mapPickedCoord.value = null
+  }
+  function deactivateMapPick() {
+    mapPickMode.value = null
+  }
+  function setMapPickedCoord(lat, lng) {
+    if (!mapPickMode.value) return
+    mapPickedCoord.value = { lat, lng, target: mapPickMode.value }
+    mapPickMode.value = null
+  }
+
   return {
     vehicles,
     selectedVehicleId,
     drivingStatus,
     speedLevel,
+    routeConfig,
     routeVehicleCounts,
     targetVehicleCount,
-    avgSpeed,
+    routeSpeeds,
     elapsedTime,
     selectedVehicle,
     vehicleCount,
@@ -156,12 +222,24 @@ export const useVehicleStore = defineStore('vehicle', () => {
     setSelectedVehicle,
     setDrivingStatus,
     setSpeedLevel,
+    setRouteConfig,
+    initRouteVehicleCounts,
+    addRouteToCounts,
+    removeRouteFromCounts,
     setRouteVehicleCount,
-    setAvgSpeed,
+    setRouteSpeed,
+    initRouteSpeeds,
+    addRouteSpeed,
+    removeRouteSpeed,
     startTimer,
     stopTimer,
     reset,
     pause,
-    resume
+    resume,
+    mapPickMode,
+    mapPickedCoord,
+    activateMapPick,
+    deactivateMapPick,
+    setMapPickedCoord,
   }
 })

@@ -94,9 +94,9 @@
             :key="rsuId"
             class="rsu-tag"
             :style="{
-              background: (rsuRouteMap.get(rsuId) ? ROUTE_COLORS[rsuRouteMap.get(rsuId)] : '#409EFF') + '22',
-              color: rsuRouteMap.get(rsuId) ? ROUTE_COLORS[rsuRouteMap.get(rsuId)] : '#409EFF',
-              borderColor: rsuRouteMap.get(rsuId) ? ROUTE_COLORS[rsuRouteMap.get(rsuId)] : '#d9ecff',
+              background: (rsuRouteMap.get(rsuId) ? (routeColorMap[rsuRouteMap.get(rsuId)]?.body || '#409EFF') : '#409EFF') + '22',
+              color: rsuRouteMap.get(rsuId) ? (routeColorMap[rsuRouteMap.get(rsuId)]?.body || '#409EFF') : '#409EFF',
+              borderColor: rsuRouteMap.get(rsuId) ? (routeColorMap[rsuRouteMap.get(rsuId)]?.body || '#409EFF') : '#d9ecff',
             }"
           >RSU #{{ rsuId }}</span>
           <div v-if="!selectedVehicle?.upcomingRsuIds?.length" class="rsu-empty-text">暂无数据</div>
@@ -118,6 +118,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useVehicleStore } from '../stores/vehicleStore'
 import socketService from '../services/socket'
+import { generateRouteColors } from '../utils/routeColors'
 import RSUHitRate from './RSUHitRate.vue'
 
 const props = defineProps({
@@ -143,11 +144,11 @@ const rsuRouteMap = computed(() => {
   return map
 })
 
-// 路线颜色（与 MapView 保持一致）
-const ROUTE_COLORS = {
-  1: '#409EFF', 2: '#E6A23C', 3: '#67C23A',
-  4: '#F56C6C', 5: '#B37FEB', 6: '#36CFC9',
-}
+// 路线颜色（从后端数据动态计算）
+const routeColorMap = computed(() => {
+  const ids = (props.rsuData?.routes || []).map(r => r.id)
+  return generateRouteColors(ids)
+})
 
 const selectedVehicle = computed(() => vehicleStore.selectedVehicle)
 const vehicleCount = computed(() => vehicleStore.vehicleCount)

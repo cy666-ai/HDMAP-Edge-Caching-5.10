@@ -83,6 +83,7 @@
 <script setup>
 import { computed } from 'vue'
 import socketService from '../services/socket'
+import { generateRouteColors } from '../utils/routeColors'
 
 const props = defineProps({
   data: {
@@ -121,9 +122,13 @@ function hitRateColor(rate) {
   return '#F56C6C'
 }
 
+const routeColors = computed(() => {
+  const ids = (props.data?.routes || []).map(r => r.id)
+  return generateRouteColors(ids)
+})
+
 function routeColor(id) {
-  const colors = { 1: '#409EFF', 2: '#E6A23C', 3: '#67C23A', 4: '#F56C6C', 5: '#B37FEB', 6: '#36CFC9' }
-  return colors[id] || '#909399'
+  return routeColors.value[id]?.body || '#909399'
 }
 
 function formatTime(iso) {

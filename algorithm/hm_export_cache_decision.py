@@ -92,7 +92,7 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
     Parameters
     ----------
     route_info : dict
-        Contains routeId, E, X, vehicleCount.
+        Contains routeId, E, X, vehicleCount, speedKmh.
     alpha, Capacity_Scale, allowed_layers_per_block, layer_profit_ranges :
         Algorithm parameters.
 
@@ -100,14 +100,23 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
     -------
     dict : route result with cache decisions, hit rates, etc.
     """
+    # ---- Reference speed: psi distribution is calibrated for 36 km/h ----
+    V_REF = 36.0
+
     routeId = route_info['routeId']
     E = route_info['E']
     X = route_info['X']
     vehicleCount = route_info.get('vehicleCount', 0)
+    route_speed = float(route_info.get('speedKmh', V_REF))
+    # Clamp to avoid division by zero; cap speed factor at 0.2x ~ 5.0x
+    route_speed = max(route_speed, 1.0)
+    speed_factor = V_REF / route_speed
+    speed_factor = max(0.2, min(speed_factor, 5.0))
 
     TOTAL_TILES = E * X
     print(f"\n========== 路线 {routeId}: E={E}, X={X}, "
-          f"车辆={vehicleCount}, 总块数={TOTAL_TILES} ==========")
+          f"车辆={vehicleCount}, 速度={route_speed:.0f}km/h, "
+          f"速度因子={speed_factor:.3f}, 总块数={TOTAL_TILES} ==========")
 
     if E < 1 or X < 1:
         print(f"  跳过: 无效参数")
@@ -117,8 +126,13 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
     Prob_Route = np.ones(E) * 0.5
 
     Tile_Size = np.ones(TOTAL_TILES)
+    # 固定容量：RSU 硬件存储能力不变（上限 = X，RSU不能缓存超过其管理的瓦片数）
+    # 速度通过 psi_eff 影响 MWC 选哪些瓦片缓存
+    # 低速 → psi_eff 高 → W_net 高 → MWC 选更多瓦片 → 可能填满 C_RSU
+    # 高速 → psi_eff 低 → W_net 低 → MWC 精挑高价值瓦片 → 缓存量自然下降
     C_RSU = np.round(Prob_Route * X * Capacity_Scale)
-    C_RSU = np.maximum(C_RSU, round(X * 0.3)).astype(int)
+    C_RSU = np.minimum(C_RSU, X).astype(int)
+    C_RSU = np.maximum(C_RSU, round(X * 0.2)).astype(int)
 
     # ---- Stage 1: Probability Distribution ----
     print(f"  生成概率分布 (E={E}, X={X})...")
@@ -133,6 +147,12 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
         col_start = col_offset * X
         col_end = (col_offset + 1) * X
         psi[start_idx:end_idx] = psi_matrix[r, col_start:col_end]
+
+    # ---- Speed-adjusted effective probability ----
+    # psi 基准分布对应 V_REF=36km/h。
+    # 速度慢 → 车辆在 RSU 范围内停留更久 → 有效请求概率升高（speed_factor > 1）
+    # 速度快 → 停留时间短 → 有效请求概率降低（speed_factor < 1）
+    psi_eff = np.clip(psi * speed_factor, 0.0, 0.99)
 
     # ---- Stage 2: Tile Block Layer Assignment ----
     print(f"  分配瓦块层级...")
@@ -165,6 +185,7 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
     NUM_BLOCKS = len(block_layer_counts)
 
     # ---- Stage 3: Net Expected Utility Computation ----
+    # 使用速度调整后的 psi_eff 计算净效用，影响 MWC 缓存决策
     print(f"  计算净收益...")
     W_net = np.zeros(TOTAL_TILES)
 
@@ -183,7 +204,7 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
             tile_idx = block_idx_list[l_idx]
             profit_range = profit_ranges_list[layer_type]
             profit = np.random.randint(profit_range[0], profit_range[1] + 1)
-            p_val = psi[tile_idx]
+            p_val = psi_eff[tile_idx]
             W_net[tile_idx] = (p_val - alpha * (1 - p_val)) * profit
 
     # ---- Stage 4: Dependency Matrix ----
@@ -228,6 +249,11 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
         MaxNetUtility_Final = MaxNetUtility_MWC
 
     # ---- Stage 7: Cache Hit Rate Computation ----
+    # CHR = sum(cache * psi_eff) / sum(psi_eff)，分子分母均使用速度调整后的 psi_eff。
+    # 速度影响：通过 psi_eff → W_net → MWC 选哪些瓦片缓存
+    #   低速 → psi_eff 高 → MWC 倾向于缓存更多瓦片（受 C_RSU 硬约束）
+    #   高速 → psi_eff 低 → MWC 精挑高价值瓦片，缓存数量自然减少
+    # CHR 始终 ≤ 1.0（命中数 ≤ 请求数），无需额外 cap
     print(f"  计算命中率...")
     CHR_RSU = np.zeros(E)
     Total_Hit_Route = 0.0
@@ -238,22 +264,22 @@ def process_route(route_info, alpha, Capacity_Scale, allowed_layers_per_block,
         end_idx = (r + 1) * X
         Tile_Indices_r = np.arange(start_idx, end_idx)
 
-        Base_Request_r = np.sum(psi[Tile_Indices_r])
+        Base_Request_r = np.sum(psi_eff[Tile_Indices_r])
         Request_Weighted_r = Base_Request_r * Prob_Route[r]
         Total_Req_Route += Request_Weighted_r
 
         Hit_RSU_r = (np.sum(CacheDecision_Final[Tile_Indices_r]
-                            * psi[Tile_Indices_r])
+                            * psi_eff[Tile_Indices_r])
                      * Prob_Route[r])
         Total_Hit_Route += Hit_RSU_r
 
-        if Base_Request_r > 0:
+        if Request_Weighted_r > 0:
             CHR_RSU[r] = Hit_RSU_r / Request_Weighted_r
         else:
             CHR_RSU[r] = 0.0
 
     CHR_Total = Total_Hit_Route / Total_Req_Route if Total_Req_Route > 0 else 0.0
-    print(f"  路线 {routeId} MWC 命中率: {CHR_Total:.4f}, "
+    print(f"  路线 {routeId} MWC 命中率: {CHR_Total:.4f} (速度因子={speed_factor:.3f}), "
           f"缓存块数: {np.sum(CacheDecision_Final):.0f}/{TOTAL_TILES}")
 
     # ---- Build result ----

@@ -27,6 +27,7 @@
       <!-- 右侧面板区域 -->
       <div class="side-panel" :style="{ width: panelWidth + 'px' }">
         <ControlPanel />
+        <RouteManager />
 
         <!-- 面板切换 Tab -->
         <div class="panel-tabs">
@@ -61,6 +62,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Monitor, Aim, DataAnalysis } from '@element-plus/icons-vue'
 import MapView from '../components/MapView.vue'
 import ControlPanel from '../components/ControlPanel.vue'
+import RouteManager from '../components/RouteManager.vue'
 import DataDisplay from '../components/DataDisplay.vue'
 import StatisticsPanel from '../components/StatisticsPanel.vue'
 import { useVehicleStore } from '../stores/vehicleStore'
@@ -122,10 +124,19 @@ function onVehiclePosition(data) {
 function onSimulationStatus(data) {
   if (data?.status === 'started') {
     vehicleStore.setDrivingStatus('running')
+    // 同步后端确认的路线配置（车辆计数和速度）
+    if (data.routeVehicleCounts) {
+      vehicleStore.routeVehicleCounts = data.routeVehicleCounts
+    }
+    if (data.routeSpeeds) {
+      vehicleStore.routeSpeeds = data.routeSpeeds
+    }
   } else if (data?.status === 'paused') {
     vehicleStore.setDrivingStatus('paused')
   } else if (data?.status === 'reset') {
     vehicleStore.reset()
+    // 清空地图上的旧 RSU 和车辆数据，等待后端推送新的 rsu:update
+    rsuData.value = null
   }
 }
 

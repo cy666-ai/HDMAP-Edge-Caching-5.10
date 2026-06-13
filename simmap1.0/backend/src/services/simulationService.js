@@ -19,82 +19,6 @@ import { computeRSUDeployment } from '../utils/rsuDeployment.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROUTE_CACHE_FILE = path.resolve(__dirname, '../../data/route_paths.json')
 
-// 6条固定地铁站间路线定义（高精度坐标）
-const ROUTE_DEFS = [
-  {
-    id: 1, name: '古平岗→新庄', start: '古平岗站', end: '新庄站',
-    waypoints: [
-      [32.07102955609951, 118.7571970943238],  // 古平岗站
-      [32.072000000000000, 118.76500000000000],  // 向东
-      [32.073000000000000, 118.77500000000000],  // 向东
-      [32.074000000000000, 118.78500000000000],  // 向东
-      [32.075000000000000, 118.79500000000000],  // 向东
-      [32.076387129198740, 118.80417158810707],  // 新庄站
-    ],
-  },
-  {
-    id: 2, name: '草场门→九华山', start: '草场门站', end: '九华山站',
-    waypoints: [
-      [32.060421913675000, 118.75586611575406],  // 草场门站
-      [32.060000000000000, 118.76200000000000],  // 北京西路
-      [32.060000000000000, 118.77000000000000],  // 北京西路
-      [32.059000000000000, 118.77800000000000],  // 北京西路（云南路附近）
-      [32.058000000000000, 118.78500000000000],  // 北京东路（鼓楼附近）
-      [32.057500000000000, 118.79500000000000],  // 北京东路
-      [32.057438546125040, 118.80587678028652],  // 九华山站
-    ],
-  },
-  {
-    id: 3, name: '汉中门→西安门', start: '汉中门站', end: '西安门站',
-    waypoints: [
-      [32.042793354220926, 118.76708202719072],  // 汉中门站
-      [32.042500000000000, 118.77500000000000],  // 汉中路
-      [32.041500000000000, 118.78300000000000],  // 汉中路
-      [32.041000000000000, 118.79000000000000],  // 汉中路东段
-      [32.040500000000000, 118.79800000000000],  // 汉中路东段
-      [32.040434898604204, 118.80425811526537],  // 西安门站
-    ],
-  },
-  {
-    id: 4, name: '古平岗→汉中门', start: '古平岗站', end: '汉中门站',
-    waypoints: [
-      [32.07102955609951, 118.7571970943238],  // 古平岗站
-      [32.066000000000000, 118.76000000000000],  // 虎踞路
-      [32.060000000000000, 118.76200000000000],  // 虎踞路
-      [32.055000000000000, 118.76400000000000],  // 虎踞路
-      [32.050000000000000, 118.76500000000000],  // 虎踞路
-      [32.042793354220926, 118.76708202719072],  // 汉中门站
-    ],
-  },
-  {
-    id: 5, name: '新模范马路→新街口', start: '新模范马路站', end: '新街口站',
-    waypoints: [
-      [32.079932709933416, 118.78411162470866],  // 新模范马路站
-      [32.075000000000000, 118.78410000000000],  // 中央路
-      [32.070000000000000, 118.78410000000000],  // 中央路
-      [32.065000000000000, 118.78410000000000],  // 中央路
-      [32.060000000000000, 118.78410000000000],  // 中央路
-      [32.055000000000000, 118.78410000000000],  // 中央路
-      [32.050000000000000, 118.78410000000000],  // 中央路
-      [32.045000000000000, 118.78410000000000],  // 中央路
-      [32.041611022106075, 118.78419797766223],  // 新街口站
-    ],
-  },
-  {
-    id: 6, name: '新庄→西安门', start: '新庄站', end: '西安门站',
-    waypoints: [
-      [32.076387129198740, 118.80417158810707],  // 新庄站
-      [32.074000000000000, 118.80900000000000],  // 向西南
-      [32.070000000000000, 118.80800000000000],  // 向南
-      [32.065000000000000, 118.80700000000000],  // 向南
-      [32.060000000000000, 118.80600000000000],  // 向南
-      [32.055000000000000, 118.80600000000000],  // 向南
-      [32.050000000000000, 118.80600000000000],  // 向南
-      [32.040434898604204, 118.80425811526537],  // 西安门站
-    ],
-  },
-]
-
 /**
  * Haversine 距离计算（米）
  */
@@ -121,14 +45,21 @@ function computePathDistAt(path, pointIndex) {
 }
 
 export class SimulationService {
-  constructor(io) {
+  constructor(io, routeConfig) {
     this.io = io
     this.timer = null
     this.running = false
     this.paused = false
     this.speedLevel = 5
-    this.routeVehicleCounts = { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
-    this.avgSpeed = 1.0      // 平均速度倍率
+    this.routeConfig = routeConfig || { routes: [], defaultVehicleCount: 5 }
+    // 每条路线的目标车辆数，从 routeConfig 动态初始化
+    this.routeVehicleCounts = Object.fromEntries(
+      this.routeConfig.routes.map(r => [r.id, this.routeConfig.defaultVehicleCount || 5])
+    )
+    // 每条路线的独立速度（km/h），默认 35 km/h
+    this.routeSpeeds = Object.fromEntries(
+      this.routeConfig.routes.map(r => [r.id, 35])
+    )
     this.tickCount = 0
     this.cachingService = null
 
@@ -161,7 +92,19 @@ export class SimulationService {
       ]
     }
 
-    this.initVehicles(this.routeVehicleCounts, this.avgSpeed)
+    // 车辆初始化延迟到 initialize() 中，确保高德API路径先加载完毕
+    this._initialized = false
+  }
+
+  /**
+   * 异步初始化：先加载高德API路径，再初始化车辆。
+   * 必须在构造函数之后调用，禁止在 Amap 路径就绪前使用插值回退。
+   */
+  async initialize() {
+    await this.fetchAmapRoutesAsync()
+    this.initVehicles(this.routeVehicleCounts, this.routeSpeeds)
+    this._initialized = true
+    console.log('[Simulation] 异步初始化完成，所有路线使用高德API真实路径')
   }
 
   /**
@@ -189,6 +132,54 @@ export class SimulationService {
   /**
    * 生成道路坐标点
    */
+  /**
+   * 从航点数组插值生成路径（{latitude, longitude} 格式），用于无高德API路径时的回退
+   * @param {Array<Array<number>>} waypoints - [[lat, lng], ...]
+   * @param {number} totalPoints - 目标插值点数
+   * @returns {Array<{latitude: number, longitude: number}>}
+   */
+  _interpolateWaypoints(waypoints, totalPoints = 50) {
+    if (waypoints.length < 2) return []
+    // 计算各段累积距离
+    const segDists = []
+    let totalDist = 0
+    for (let i = 1; i < waypoints.length; i++) {
+      const d = this._haversine(
+        waypoints[i - 1][0], waypoints[i - 1][1],
+        waypoints[i][0], waypoints[i][1]
+      )
+      segDists.push(d)
+      totalDist += d
+    }
+    // 按距离等距插值
+    const points = []
+    for (let k = 0; k < totalPoints; k++) {
+      const target = (k / (totalPoints - 1)) * totalDist
+      let acc = 0
+      let seg = 0
+      for (; seg < segDists.length; seg++) {
+        if (acc + segDists[seg] >= target || seg === segDists.length - 1) break
+        acc += segDists[seg]
+      }
+      const segDist = segDists[seg] || 1
+      const t = segDist > 0 ? Math.max(0, Math.min(1, (target - acc) / segDist)) : 0
+      const lat = waypoints[seg][0] + (waypoints[seg + 1][0] - waypoints[seg][0]) * t
+      const lng = waypoints[seg][1] + (waypoints[seg + 1][1] - waypoints[seg][1]) * t
+      points.push({ latitude: lat, longitude: lng })
+    }
+    return points
+  }
+
+  _haversine(lat1, lng1, lat2, lng2) {
+    const R = 6371000
+    const toRad = d => d * Math.PI / 180
+    const dLat = toRad(lat2 - lat1)
+    const dLng = toRad(lng2 - lng1)
+    const a = Math.sin(dLat / 2) ** 2
+            + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+
   generateRoadPoints(lat1, lng1, lat2, lng2, count) {
     const points = []
     for (let i = 0; i <= count; i++) {
@@ -221,40 +212,23 @@ export class SimulationService {
   }
 
   /**
-   * 从路线航点生成平滑路径点
+   * 初始化车辆（按路线分配，每条路线车辆数和速度独立配置）
+   * @param {Object} routeVehicleCounts - { [routeId]: count }
+   * @param {Object} [routeSpeeds] - { [routeId]: speedKmh }，默认 35 km/h
    */
-  generateRoutePath(waypoints, pointsPerSegment = 5) {
-    const points = []
-    for (let i = 0; i < waypoints.length - 1; i++) {
-      const [lat1, lng1] = waypoints[i]
-      const [lat2, lng2] = waypoints[i + 1]
-      for (let j = 0; j < pointsPerSegment; j++) {
-        const t = j / pointsPerSegment
-        points.push({
-          latitude: +(lat1 + (lat2 - lat1) * t).toFixed(6),
-          longitude: +(lng1 + (lng2 - lng1) * t).toFixed(6),
-        })
-      }
-    }
-    const [lastLat, lastLng] = waypoints[waypoints.length - 1]
-    points.push({ latitude: lastLat, longitude: lastLng })
-    return points
-  }
-
-  /**
-   * 初始化车辆（按6条固定路线分配，每条路线车辆数由参数控制）
-   * @param {Object} routeVehicleCounts - { 1: n1, 2: n2, ..., 6: n6 }
-   * @param {number} avgSpeed - 平均速度倍率
-   */
-  initVehicles(routeVehicleCounts, avgSpeed = 1.0) {
+  initVehicles(routeVehicleCounts, routeSpeeds) {
     this.vehicles = []
     this.vehiclePaths = []
 
-    const counts = routeVehicleCounts || { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
-    const speedMultiplier = avgSpeed || 1.0
+    const counts = routeVehicleCounts || Object.fromEntries(
+      this.routeConfig.routes.map(r => [r.id, this.routeConfig.defaultVehicleCount || 5])
+    )
+    const speeds = routeSpeeds || Object.fromEntries(
+      this.routeConfig.routes.map(r => [r.id, 35])
+    )
 
     // 获取RSU部署数据，用于计算每辆车的内容块
-    const deployment = computeRSUDeployment()
+    const deployment = computeRSUDeployment(this.routeConfig.routes)
 
     // 按 routeId 分组 RSU，用于确定每辆车将要途经的 RSU
     const rsusByRoute = {}
@@ -270,16 +244,22 @@ export class SimulationService {
       rsusByRoute[rid].sort((a, b) => (a.pathDist || 0) - (b.pathDist || 0))
     }
 
-    for (const route of ROUTE_DEFS) {
-      // 优先使用高德真实路径，回退到线性插值
-      const amapPath = this.amapRoutePaths.get(route.id)
-      const path = (amapPath && amapPath.length >= 2)
-        ? amapPath
-        : this.generateRoutePath(route.waypoints)
+    for (const route of this.routeConfig.routes) {
+      // 优先使用高德API真实路径；缺失时从 waypoints 插值回退
+      let path = this.amapRoutePaths.get(route.id)
+      if (!path || path.length < 2) {
+        const wps = route.waypoints || []
+        if (wps.length < 2) {
+          console.error(`[Simulation] 路线 ${route.id} (${route.name}) 缺少路径数据，已跳过`)
+          continue
+        }
+        path = this._interpolateWaypoints(wps, Math.max(30, wps.length * 10))
+        console.warn(`[Simulation] 路线 ${route.id} (${route.name}) 无高德API路径，`
+          + `使用航点插值 (${wps.length} → ${path.length} 点)`)
+      }
 
-      const vehiclesPerRoute = counts[route.id] || 5
-      const sourceLabel = (amapPath && amapPath.length >= 2) ? '高德API' : '插值'
-      console.log(`  [路线 ${route.id}] ${route.name}: ${path.length} 个路径点, ${vehiclesPerRoute}辆车 (${sourceLabel})`)
+      const vehiclesPerRoute = counts[route.id] || this.routeConfig.defaultVehicleCount || 5
+      console.log(`  [路线 ${route.id}] ${route.name}: ${path.length} 个路径点, ${vehiclesPerRoute}辆车 (高德API)`)
 
       for (let i = 0; i < vehiclesPerRoute; i++) {
         vehicleId++
@@ -300,7 +280,8 @@ export class SimulationService {
           name: `车辆 ${vehicleId} (${route.name})`,
           latitude: path[startIdx].latitude,
           longitude: path[startIdx].longitude,
-          speed: (30 + Math.random() * 40) * speedMultiplier,
+          speed: speeds[route.id] ?? 35,
+          routeSpeedKmh: speeds[route.id] ?? 35,
           heading: 0,
           pathProgress: startIdx / (path.length - 1),
           completed: false,
@@ -319,8 +300,36 @@ export class SimulationService {
       }
     }
 
-    const perRouteSummary = ROUTE_DEFS.map(r => `${r.name}:${counts[r.id] || 5}辆`).join(', ')
-    console.log(`[Simulation] 已初始化 ${vehicleId} 辆车，分配: ${perRouteSummary}，速度倍率 ${speedMultiplier}x`)
+    const perRouteSummary = this.routeConfig.routes.map(r => `${r.name}:${counts[r.id] || 5}辆/${speeds[r.id] || 35}km/h`).join(', ')
+    console.log(`[Simulation] 已初始化 ${vehicleId} 辆车，分配: ${perRouteSummary}`)
+  }
+
+  /**
+   * 路线变更后重新初始化（不清除当前路线配置，仅重建车辆和RSU）
+   * @param {Object} newRouteConfig - 新的路线配置
+   */
+  reinitialize(newRouteConfig) {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+    this.running = false
+    this.paused = false
+    this.tickCount = 0
+    this.routeConfig = newRouteConfig || this.routeConfig
+
+    // 保留已有路线的车辆计数和速度，新路线用默认值
+    const newCounts = {}
+    const newSpeeds = {}
+    for (const route of this.routeConfig.routes) {
+      newCounts[route.id] = this.routeVehicleCounts[route.id] || this.routeConfig.defaultVehicleCount || 5
+      newSpeeds[route.id] = this.routeSpeeds[route.id] ?? 35
+    }
+    this.routeVehicleCounts = newCounts
+    this.routeSpeeds = newSpeeds
+
+    this.initVehicles(this.routeVehicleCounts, this.routeSpeeds)
+    console.log(`[Simulation] 已重新初始化，路线数: ${this.routeConfig.routes.length}`)
   }
 
   /**
@@ -328,22 +337,23 @@ export class SimulationService {
    * 仅在缓存不存在时发起网络请求，获取后自动保存缓存
    */
   async fetchAmapRoutesAsync() {
+    const routes = this.routeConfig.routes
     // 检查是否已有足够的高德路径数据
-    const existingCount = ROUTE_DEFS.filter(r => {
+    const existingCount = routes.filter(r => {
       const path = this.amapRoutePaths.get(r.id)
       return path && path.length >= 2
     }).length
-    if (existingCount >= ROUTE_DEFS.length) {
+    if (existingCount >= routes.length && routes.length > 0) {
       console.log('[Simulation] 高德路径数据已全部缓存，跳过在线获取')
       return
     }
 
     console.log('[Simulation] 开始在线获取高德路径规划数据...')
     try {
-      const routePaths = await fetchAllAmapRoutes(ROUTE_DEFS)
+      const routePaths = await fetchAllAmapRoutes(routes)
 
       // 更新缓存文件
-      saveRouteCache(ROUTE_CACHE_FILE, ROUTE_DEFS, routePaths)
+      saveRouteCache(ROUTE_CACHE_FILE, routes, routePaths)
       this.amapRoutePaths = routePaths
 
       // 更新已运行车辆的路径
@@ -376,7 +386,7 @@ export class SimulationService {
    * 更新所有车辆位置
    */
   updateVehicles() {
-    const step = 0.01 * (this.speedLevel / 5) * this.avgSpeed
+    const REF_SPEED = 60  // 参考速度 km/h — 此速度下行为与旧版 avgSpeed=1.0 一致
 
     this.vehicles.forEach((vehicle, idx) => {
       const path = this.vehiclePaths[idx]
@@ -384,6 +394,11 @@ export class SimulationService {
 
       // 已完成的车辆停在终点不再移动
       if (vehicle.completed) return
+
+      // 每条路线独立速度：归一化到参考速度计算步长
+      const routeSpeed = vehicle.routeSpeedKmh ?? 35
+      const speedFactor = routeSpeed / REF_SPEED
+      const step = 0.01 * (this.speedLevel / 5) * speedFactor
 
       // 推进进度
       vehicle.pathProgress += step
@@ -414,8 +429,9 @@ export class SimulationService {
       // 计算方向
       vehicle.heading = this.calculateHeading(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
 
-      // 模拟速度波动（受平均速度倍率影响）
-      vehicle.speed = Math.max(10, (30 + this.speedLevel * 8 + Math.sin(this.tickCount * 0.1 + idx) * 10) * this.avgSpeed)
+      // 模拟速度波动（以路线设定速度为中心 ±5 km/h 微调）
+      const baseSpeed = vehicle.routeSpeedKmh ?? 35
+      vehicle.speed = baseSpeed === 0 ? 0 : Math.max(5, baseSpeed + Math.sin(this.tickCount * 0.1 + idx) * 5)
 
       // 更新轨迹
       vehicle.trajectory.push({
@@ -472,15 +488,22 @@ export class SimulationService {
   /**
    * 启动模拟
    */
-  start(speedLevel, routeVehicleCounts, avgSpeed) {
+  start(speedLevel, routeVehicleCounts, routeSpeeds) {
     this.speedLevel = speedLevel || 5
-    this.routeVehicleCounts = routeVehicleCounts || { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5 }
-    this.avgSpeed = avgSpeed || 1.0
+    // 动态初始化默认车辆计数和速度
+    const defaultCounts = Object.fromEntries(
+      this.routeConfig.routes.map(r => [r.id, this.routeConfig.defaultVehicleCount || 5])
+    )
+    const defaultSpeeds = Object.fromEntries(
+      this.routeConfig.routes.map(r => [r.id, 35])
+    )
+    this.routeVehicleCounts = routeVehicleCounts || defaultCounts
+    this.routeSpeeds = routeSpeeds || defaultSpeeds
     this.running = true
     this.paused = false
 
     // 用新参数重新初始化车辆
-    this.initVehicles(this.routeVehicleCounts, this.avgSpeed)
+    this.initVehicles(this.routeVehicleCounts, this.routeSpeeds)
 
     if (this.timer) {
       clearInterval(this.timer)
@@ -488,7 +511,8 @@ export class SimulationService {
 
     const total = Object.values(this.routeVehicleCounts).reduce((a, b) => a + b, 0)
     const interval = Math.max(100, 1000 - (this.speedLevel - 1) * 100)
-    console.log(`[Simulation] 启动模拟, 速度等级: ${this.speedLevel}, 车辆总数: ${total}, 速度倍率: ${this.avgSpeed}x, 推送间隔: ${interval}ms`)
+    const speedSummary = this.routeConfig.routes.map(r => `${r.name}:${this.routeSpeeds[r.id] || 35}km/h`).join(', ')
+    console.log(`[Simulation] 启动模拟, 速度等级: ${this.speedLevel}, 车辆总数: ${total}, 路线速度: [${speedSummary}], 推送间隔: ${interval}ms`)
 
     // 先发送初始数据
     this.updateVehicles()
@@ -511,9 +535,39 @@ export class SimulationService {
   }
 
   /**
-   * 恢复
+   * 恢复（支持运行时更新路线速度和车辆数）
+   * @param {Object} [routeVehicleCounts] - 可选，更新后的路线车辆数
+   * @param {Object} [routeSpeeds] - 可选，更新后的路线速度 km/h
    */
-  resume() {
+  resume(routeVehicleCounts, routeSpeeds) {
+    const counts = routeVehicleCounts || this.routeVehicleCounts
+    const speeds = routeSpeeds || this.routeSpeeds
+
+    // 检查车辆数是否变化
+    const countChanged = routeVehicleCounts && Object.keys(routeVehicleCounts).some(
+      id => routeVehicleCounts[id] !== this.routeVehicleCounts[id]
+    )
+
+    if (countChanged) {
+      // 车辆数变了 → 全部重新初始化
+      this.routeVehicleCounts = counts
+      this.routeSpeeds = speeds
+      this.initVehicles(this.routeVehicleCounts, this.routeSpeeds)
+      console.log('[Simulation] 车辆配置已更新，已重新初始化')
+    } else if (routeSpeeds) {
+      // 仅速度变化 → 原地更新每辆车的速度，保留当前位置
+      this.routeSpeeds = speeds
+      for (const vehicle of this.vehicles) {
+        const newSpeed = speeds[vehicle.routeId]
+        if (newSpeed !== undefined) {
+          vehicle.routeSpeedKmh = newSpeed
+          vehicle.speed = newSpeed
+        }
+      }
+      const speedSummary = this.routeConfig.routes.map(r => `${r.name}:${speeds[r.id] || 35}km/h`).join(', ')
+      console.log(`[Simulation] 路线速度已更新: [${speedSummary}]`)
+    }
+
     this.paused = false
     console.log('[Simulation] 模拟已恢复')
   }
@@ -529,7 +583,7 @@ export class SimulationService {
     this.running = false
     this.paused = false
     this.tickCount = 0
-    this.initVehicles(this.routeVehicleCounts, this.avgSpeed)
+    this.initVehicles(this.routeVehicleCounts, this.routeSpeeds)
     console.log('[Simulation] 模拟已重置')
   }
 

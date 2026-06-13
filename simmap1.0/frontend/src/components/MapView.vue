@@ -1,11 +1,19 @@
 <template>
-  <div ref="mapContainer" class="map-view"></div>
+  <div ref="mapContainer" class="map-view" :class="{ 'picking-mode': vehicleStore.mapPickMode }">
+    <div v-if="vehicleStore.mapPickMode" class="pick-hint">
+      <el-icon><MapLocation /></el-icon>
+      <span>请在地图上点击选择{{ vehicleStore.mapPickMode === 'start' ? '起点' : '终点' }}</span>
+      <el-button size="small" text @click="cancelPick">取消</el-button>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import L from 'leaflet'
+import { MapLocation } from '@element-plus/icons-vue'
 import { useVehicleStore } from '../stores/vehicleStore'
+import { generateRouteColors } from '../utils/routeColors'
 
 const props = defineProps({
   rsuData: {
@@ -42,37 +50,32 @@ const defaultZoom = 15
 
 const RSU_COVERAGE_RADIUS_M = 250  // RSU 覆盖半径（米），与后端一致
 
-// 路线名称映射（用于RSU标记）
-const ROUTE_NAMES = {
-  1: '古平岗→新庄',
-  2: '草场门→九华山',
-  3: '汉中门→西安门',
-  4: '古平岗→汉中门',
-  5: '新模范马路→新街口',
-  6: '新庄→西安门',
-}
+// 路线名称和颜色（从后端数据动态计算）
+const routeNameMap = computed(() => {
+  const map = {}
+  for (const r of (props.rsuData?.routes || [])) {
+    map[r.id] = r.name
+  }
+  return map
+})
 
-// 高德地图切片图层（需要在实际使用时替换API密钥）
+const routeColors = computed(() => {
+  const ids = (props.rsuData?.routes || []).map(r => r.id)
+  return generateRouteColors(ids)
+})
+
+// 高德地图切片图层
 const amapTileLayer = L.tileLayer('https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
   attribution: '&copy; 高德地图',
   maxZoom: 18,
   minZoom: 3
 })
 
-// 6条路线的颜色（与 RSUHitRate.vue 的 routeColor 一致）
-const ROUTE_COLORS = {
-  1: { body: '#409EFF', stroke: '#2c6db5', window: '#8ac4ff' },
-  2: { body: '#E6A23C', stroke: '#b8821f', window: '#f0c78a' },
-  3: { body: '#67C23A', stroke: '#4a9e2a', window: '#95d475' },
-  4: { body: '#F56C6C', stroke: '#c04040', window: '#f8a0a0' },
-  5: { body: '#B37FEB', stroke: '#8a5ccf', window: '#d0b0f5' },
-  6: { body: '#36CFC9', stroke: '#28a09a', window: '#80e0db' },
-}
-
 // 创建车辆图标（按路线着色，每条路线5辆车同色便于识别）
 function createCarIcon(heading = 0, routeId = 1) {
   const size = 32
-  const c = ROUTE_COLORS[routeId] || ROUTE_COLORS[1]
+  const fallback = { body: '#409EFF', stroke: '#2c6db5', window: '#8ac4ff' }
+  const c = routeColors.value[routeId] || routeColors.value[1] || fallback
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${size}" height="${size}">
       <g transform="rotate(${heading}, 16, 16)">
@@ -94,7 +97,7 @@ function createCarIcon(heading = 0, routeId = 1) {
 
 // 创建轨迹线样式（按路线着色，与车辆图标颜色一致）
 function getTrajectoryStyle(routeId) {
-  const c = ROUTE_COLORS[routeId]
+  const c = routeColors.value[routeId]
   return { color: c ? c.body : '#909399', weight: 3, opacity: 0.7 }
 }
 
@@ -114,9 +117,9 @@ function initRsuMarkers() {
   if (rsuList.length === 0) return
 
   rsuList.forEach((rsu) => {
-    const routeColor = ROUTE_COLORS[rsu.routeId]
+    const routeColor = routeColors.value[rsu.routeId]
     const color = routeColor ? routeColor.body : '#909399'
-    const routeName = ROUTE_NAMES[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
+    const routeName = routeNameMap.value[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
     const latlng = [rsu.latitude, rsu.longitude]
     const tileCount = rsu.cachedTiles?.length || 0
 
@@ -180,9 +183,9 @@ function updateRsuMarkers(rsuData) {
     if (!marker) continue
     const hitRate = (rsu.hitRate * 100).toFixed(1)
     const tileCount = rsu.cachedTiles?.length || 0
-    const routeColor = ROUTE_COLORS[rsu.routeId]
+    const routeColor = routeColors.value[rsu.routeId]
     const color = routeColor ? routeColor.body : '#909399'
-    const routeName = ROUTE_NAMES[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
+    const routeName = routeNameMap.value[rsu.routeId] || `路线 ${rsu.routeId || '?'}`
     // 根据命中率调整透明度
     marker.setStyle({ fillOpacity: 0.3 + hitRate / 100 * 0.7 })
     // 更新 popup 内容
@@ -280,7 +283,7 @@ function updateVehicleMarkers(vehicles) {
                   ${upcomingIds.length > 0
                     ? upcomingIds.map(ruid => {
                         const rRouteId = rsuRouteMap.value.get(ruid) || live.routeId
-                        const c = ROUTE_COLORS[rRouteId]?.body || '#409EFF'
+                        const c = routeColors.value[rRouteId]?.body || '#409EFF'
                         return `<span style="font-size:10px;padding:2px 6px;background:${c}22;color:${c};border-radius:3px;border:1px solid ${c};white-space:nowrap;">RSU #${ruid}</span>`
                       }).join('')
                     : '<span style="color:#c0c4cc;">暂无数据</span>'
@@ -335,12 +338,24 @@ watch(() => vehicleStore.selectedVehicleId, (newId) => {
   }
 })
 
-// 监听 RSU 数据更新（首次到达时创建标记，后续更新命中率）
+// 监听 RSU 数据更新
+// - rsuData → null（路线变更/重置）: 清除旧标记，下次新数据到达时全量重建
+// - 数据正常更新且标记集为空: 全量初始化（首次 / 路线变更后）
+// - 数据正常更新且标记集已存在: 增量更新命中率（每5秒广播，避免闪烁）
 watch(() => props.rsuData, (data) => {
-  if (!data || !data.rsus) return
+  if (!data || !data.rsus) {
+    // rsuData 被清空（路线变更/重置）→ 清除所有旧 RSU 标记和覆盖圆
+    Object.values(rsuMarkers).forEach(m => map?.removeLayer(m))
+    Object.values(rsuCoverageCircles).forEach(c => map?.removeLayer(c))
+    rsuMarkers = {}
+    rsuCoverageCircles = {}
+    return
+  }
   if (Object.keys(rsuMarkers).length === 0) {
+    // 全新初始化（首次加载 或 路线变更后重新构建）
     initRsuMarkers()
   } else {
+    // 周期性增量更新（仅刷新命中率、缓存瓦片等统计数据）
     updateRsuMarkers(data)
   }
 }, { deep: true, immediate: false })
@@ -358,6 +373,33 @@ onBeforeUnmount(() => {
   trajectoryLines = {}
   rsuMarkers = {}
   rsuCoverageCircles = {}
+})
+
+// 地图取点相关
+let pickClickHandler = null
+
+function cancelPick() {
+  vehicleStore.deactivateMapPick()
+}
+
+watch(() => vehicleStore.mapPickMode, (mode) => {
+  if (!map) return
+  if (mode) {
+    // 进入选点模式
+    if (pickClickHandler) map.off('click', pickClickHandler)
+    pickClickHandler = (e) => {
+      vehicleStore.setMapPickedCoord(e.latlng.lat, e.latlng.lng)
+    }
+    map.on('click', pickClickHandler)
+    map.getContainer().style.cursor = 'crosshair'
+  } else {
+    // 退出选点模式
+    if (pickClickHandler) {
+      map.off('click', pickClickHandler)
+      pickClickHandler = null
+    }
+    map.getContainer().style.cursor = ''
+  }
 })
 
 defineExpose({ fitBounds })
@@ -392,5 +434,33 @@ defineExpose({ fitBounds })
   height: 36px !important;
   line-height: 36px !important;
   font-size: 18px !important;
+}
+
+.map-view.picking-mode {
+  position: relative;
+}
+
+.pick-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: #fff;
+  border: 2px solid #409EFF;
+  border-radius: 20px;
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.3);
+  font-size: 14px;
+  color: #303133;
+  white-space: nowrap;
+}
+
+.pick-hint .el-icon {
+  color: #409EFF;
+  font-size: 18px;
 }
 </style>

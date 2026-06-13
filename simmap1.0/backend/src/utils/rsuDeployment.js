@@ -105,7 +105,31 @@ function isFarEnough(lat, lng, points, minDist) {
 }
 
 /**
- * 加载车辆行驶路径数据
+ * 从 route_paths.json 加载高德 API 真实路径坐标（按 routeId 索引）
+ * @returns {{ [routeId: number]: Array<[number, number]> }}
+ */
+function loadAmapPathCache() {
+  const routesPath = path.resolve(__dirname, '../../data/route_paths.json')
+  try {
+    if (!fs.existsSync(routesPath)) return {}
+    const raw = fs.readFileSync(routesPath, 'utf-8')
+    const data = JSON.parse(raw)
+    if (!data.routes) return {}
+    const map = {}
+    for (const r of data.routes) {
+      if (r.points && r.points.length >= 2) {
+        map[r.id] = r.points.map(p => [p.latitude, p.longitude])
+      }
+    }
+    return map
+  } catch (err) {
+    console.warn(`[rsuDeployment] 高德路径缓存读取失败: ${err.message}`)
+    return {}
+  }
+}
+
+/**
+ * 加载车辆行驶路径数据（无 routesParam 时的回退）
  * 优先从 route_paths.json（高德API真实路径），回退到内置路线航点
  */
 function loadRoutePaths() {
@@ -139,11 +163,46 @@ function loadRoutePaths() {
 }
 
 /**
+ * 从稀疏航点插值生成密集路径点（[lat, lng] 数组格式）。
+ * 当高德API缓存不可用且 waypoints 太少时使用，确保RSU沿合理路径分布。
+ */
+function interpolateWaypoints(waypoints, targetCount = 40) {
+  if (waypoints.length < 2) return waypoints
+  if (waypoints.length >= targetCount) return waypoints
+  // 计算各段长度
+  const segDists = []
+  let totalDist = 0
+  for (let i = 1; i < waypoints.length; i++) {
+    const d = haversineDist(waypoints[i - 1][0], waypoints[i - 1][1],
+                            waypoints[i][0], waypoints[i][1])
+    segDists.push(d)
+    totalDist += d
+  }
+  if (totalDist <= 0) return waypoints
+  // 等距插值
+  const result = []
+  for (let k = 0; k < targetCount; k++) {
+    const target = (k / (targetCount - 1)) * totalDist
+    let acc = 0, seg = 0
+    for (; seg < segDists.length; seg++) {
+      if (acc + segDists[seg] >= target || seg === segDists.length - 1) break
+      acc += segDists[seg]
+    }
+    const segDist = segDists[seg] || 1
+    const t = segDist > 0 ? Math.max(0, Math.min(1, (target - acc) / segDist)) : 0
+    const lat = waypoints[seg][0] + (waypoints[seg + 1][0] - waypoints[seg][0]) * t
+    const lng = waypoints[seg][1] + (waypoints[seg + 1][1] - waypoints[seg][1]) * t
+    result.push([lat, lng])
+  }
+  return result
+}
+
+/**
  * 沿高德路径规划的道路经纬度，每隔500m生成RSU候选点
  * 使用累积 Haversine 距离在 polyline 上等距部署
  */
 function generateRouteRSUPoints(routes) {
-  const points = []
+  const allPoints = []
 
   for (const route of routes) {
     const pts = route.points
@@ -157,6 +216,9 @@ function generateRouteRSUPoints(routes) {
     }
     const totalLength = cumDist[pts.length - 1]
     const numSegments = Math.max(1, Math.round(totalLength / RSU_SPACING_M))
+
+    // 每条路线独立的 RSU 点列表，只在本路线内去重
+    const routePoints = []
 
     for (let s = 0; s <= numSegments; s++) {
       if (numSegments === 0) break
@@ -182,21 +244,56 @@ function generateRouteRSUPoints(routes) {
       else if (s >= numSegments) ptName = `${route.name} 终点`
       else ptName = `${route.name} (${distFromStart}m)`
 
-      if (isFarEnough(lat, lng, points, MIN_DIST_M)) {
-        points.push({ lat, lng, name: ptName, routeId, pathDist: targetDist })
+      // 仅与本路线已有的 RSU 点做去重检查，不同路线保留独立 RSU 链
+      if (isFarEnough(lat, lng, routePoints, MIN_DIST_M)) {
+        routePoints.push({ lat, lng, name: ptName, routeId, pathDist: targetDist })
       }
     }
+
+    allPoints.push(...routePoints)
   }
 
-  return points
+  return allPoints
 }
 
 /**
  * 计算 RSU 部署方案（仅沿高德路径规划的道路经纬度部署）
- * @returns {{ intersections: Array, regionCounts: number[], regionNames: string[], regionLats: number[], totalRSU: number }}
+ * @param {Array} [routesParam] - 可选路线数组 [{id, name, points: [[lat,lng],...]}]
+ *   若不传则从 route_paths.json 加载
+ * @returns {{ intersections: Array, regionCounts: number[], regionNames: string[], regionLats: number[], totalRSU: number, routeRsuCounts: {} }}
  */
-export function computeRSUDeployment() {
-  const routes = loadRoutePaths()
+export function computeRSUDeployment(routesParam) {
+  let routes
+
+  if (routesParam && Array.isArray(routesParam) && routesParam.length > 0) {
+    // 始终优先使用高德API真实路径的密集坐标点部署RSU
+    const amapCache = loadAmapPathCache()
+    let amapCount = 0
+
+    routes = routesParam.map(r => {
+      const amapPoints = amapCache[r.id]
+      if (amapPoints && amapPoints.length >= 2) {
+        amapCount++
+        return { id: r.id, name: r.name, points: amapPoints }
+      }
+      // 无高德缓存时回退到 waypoints，点数太少则插值
+      const raw = (r.points || r.waypoints || []).map(p =>
+        Array.isArray(p) ? p : [p.latitude, p.longitude]
+      )
+      const fallback = raw.length >= 2 ? interpolateWaypoints(raw, 40) : raw
+      if (raw.length >= 2 && raw.length < 10) {
+        console.log(`[rsuDeployment] 路线 ${r.id} (${r.name}) 无高德路径，`
+          + `航点 ${raw.length} → 插值 ${fallback.length} 点`)
+      }
+      return { id: r.id, name: r.name, points: fallback }
+    })
+
+    if (amapCount > 0) {
+      console.log(`[rsuDeployment] ${amapCount}/${routes.length} 路线使用高德API真实路径部署RSU`)
+    }
+  } else {
+    routes = loadRoutePaths()
+  }
 
   // 沿车辆行驶路径生成 RSU 点（每隔500m一个，覆盖半径250m，不重叠）
   const allPoints = generateRouteRSUPoints(routes)
