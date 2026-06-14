@@ -1,6 +1,6 @@
 """
-HDMAP Edge Caching System — Agent Tools
-All 7 tools rewritten from "robot vacuum customer service" to "HDMAP edge caching assistant".
+HLR-Cache Edge Caching System — Agent Tools
+All 7 tools rewritten from "robot vacuum customer service" to "HLR-Cache edge caching assistant".
 
 Tools that need real-time system state (get_rsu_status, get_active_routes, etc.) use
 standalone stubs that work without the Node.js backend. When the backend is running,
@@ -40,9 +40,9 @@ ROUTES = [
 # =====================================================================
 # Tool 1: RAG knowledge-base search
 # =====================================================================
-@tool(description="从 HDMAP 知识库中检索边缘缓存、MWC算法、RSU部署、路由与车辆配置、前端界面（按钮功能、图表含义、页面布局）等相关专业资料，返回总结后的回答")
+@tool(description="从 HLR-Cache 知识库中检索边缘缓存、MWC算法、RSU部署、路由与车辆配置、前端界面（按钮功能、图表含义、页面布局）等相关专业资料，返回总结后的回答")
 def rag_summarize(query: str) -> str:
-    """Search the HDMAP knowledge base (Chroma vector store) for relevant documentation."""
+    """Search the HLR-Cache knowledge base (Chroma vector store) for relevant documentation."""
     return rag.rag_summarize(query)
 
 
@@ -171,7 +171,7 @@ def get_current_tick() -> str:
 # Tool 6: RSU cache detail
 # =====================================================================
 def _load_external_data():
-    """Lazy-load external HDMAP statistics CSV."""
+    """Lazy-load external HLR-Cache statistics CSV."""
     if external_data:
         return
     external_data_path = get_abs_path(agent_conf["external_data_path"])

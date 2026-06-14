@@ -1,5 +1,5 @@
 """
-Middleware hooks for the HDMAP ReAct Agent.
+Middleware hooks for the HLR-Cache ReAct Agent.
 Adapted from the old langchain.agents middleware API to work with langgraph.prebuilt.create_react_agent.
 
 Functions:

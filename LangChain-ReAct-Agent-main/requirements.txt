@@ -26,7 +26,7 @@ pyyaml==6.0.2                    # 配置文件解析
 # 模型服务（阿里通义千问/ dashscope）
 dashscope==1.20.14                # 阿里模型调用 SDK
 
-# Agent API Server (HDMAP integration)
+# Agent API Server (HLR-Cache integration)
 fastapi>=0.109.0                  # REST API framework
 uvicorn[standard]>=0.27.0         # ASGI server
 sse-starlette>=1.8.0              # SSE streaming support

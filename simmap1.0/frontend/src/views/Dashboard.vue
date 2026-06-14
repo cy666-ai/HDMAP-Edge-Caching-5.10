@@ -4,7 +4,7 @@
     <header class="app-header">
       <div class="header-left">
         <el-icon :size="24" color="#409EFF"><Monitor /></el-icon>
-        <h1 class="app-title">面向自动驾驶的分层高精地图边缘缓存可视化系统</h1>
+        <h1 class="app-title">面向自动驾驶的分层高精地图边缘缓存系统</h1>
       </div>
       <div class="header-right">
         <el-button text @click="fitMapView">

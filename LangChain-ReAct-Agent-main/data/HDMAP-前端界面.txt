@@ -1,4 +1,4 @@
-HDMAP 分层高精地图边缘缓存可视化系统 — 前端界面说明
+HLR-Cache 面向自动驾驶的分层高精地图边缘缓存系统 — 前端界面说明
 
 前端基于 Vue 3 + Vite + Element Plus + ECharts + Leaflet 构建，采用单页面布局。
 访问地址为 http://localhost:5173。

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-面向自动驾驶的分层高精地图边缘缓存可视化系统 (Layered HD-MAP Edge Caching Visualization System for Autonomous Driving). The system simulates autonomous vehicles driving on real Nanjing road routes, each passing through a chain of Road-Side Units (RSUs) that cache map tiles. A Python MWC (Maximum Weight Closure) algorithm periodically optimizes which tiles each RSU should cache to maximize expected hit rate. A Vue 3 frontend visualizes this in real-time via Socket.IO.
+面向自动驾驶的分层高精地图边缘缓存系统 (HLR-Cache Edge Caching System for Autonomous Driving). The system simulates autonomous vehicles driving on real Nanjing road routes, each passing through a chain of Road-Side Units (RSUs) that cache map tiles. A Python MWC (Maximum Weight Closure) algorithm periodically optimizes which tiles each RSU should cache to maximize expected hit rate. A Vue 3 frontend visualizes this in real-time via Socket.IO.
 
 ## Commands
 

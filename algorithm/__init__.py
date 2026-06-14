@@ -1,5 +1,5 @@
 """
-HDMAP Edge Caching Algorithm Package (v5.10)
+HLR-Cache Edge Caching Algorithm Package (v5.10)
 Python implementation of the MWC-based RSU edge caching optimization.
 
 Originally implemented in MATLAB (5.10/), converted to Python to eliminate

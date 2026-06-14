@@ -1,19 +1,19 @@
-# 🤖 HDMAP ReAct Agent — HLR-Cache 智能助手
+# 🤖 HLR-Cache ReAct Agent — HLR-Cache 智能助手
 
 ## 项目概述
 
-面向自动驾驶的高精地图边缘缓存可视化系统（HDMAP Edge Caching System）的 **ReAct 智能助手**。基于 LangGraph ReAct Agent 框架，集成 Chroma 向量知识库检索、7 个 HDMAP 领域工具调用和动态提示词切换，支持对系统架构、MWC 算法、RSU 部署、缓存策略等问题的智能问答，以及缓存分析报告自动生成。
+面向自动驾驶的分层高精地图边缘缓存系统（HLR-Cache Edge Caching System）的 **ReAct 智能助手**。基于 LangGraph ReAct Agent 框架，集成 Chroma 向量知识库检索、7 个 HLR-Cache 领域工具调用和动态提示词切换，支持对系统架构、MWC 算法、RSU 部署、缓存策略等问题的智能问答，以及缓存分析报告自动生成。
 
 Agent 通过 FastAPI SSE 流式端点对外服务，经 Node.js Socket.IO 桥接层推送至 Vue 3 前端聊天组件。
 
 ## 核心特性
 
 #### 1. ReAct Agent 多工具调用
-- 集成 RAG 检索、RSU 状态查询、活跃路线、模拟状态、缓存详情等 7 个 HDMAP 领域工具
+- 集成 RAG 检索、RSU 状态查询、活跃路线、模拟状态、缓存详情等 7 个 HLR-Cache 领域工具
 - Agent 自主遵循"思考→行动→观察→再思考"的 ReAct 循环调用工具完成推理
 
 #### 2. RAG 检索增强问答
-- 基于 Chroma 向量数据库 + text-embedding-v4 构建 HDMAP 知识库
+- 基于 Chroma 向量数据库 + text-embedding-v4 构建 HLR-Cache 知识库
 - 6 个 TXT 知识文档覆盖系统概述、缓存策略、RSU 部署、路由与车辆、算法详解、常见问题
 
 #### 3. 动态提示词切换
@@ -37,7 +37,7 @@ Agent 通过 FastAPI SSE 流式端点对外服务，经 Node.js Socket.IO 桥接
 ├── agent/                       # Agent 核心逻辑
 │   ├── react_agent.py           # ReAct 智能体主逻辑（流式输出、异步桥接）
 │   └── tools/
-│       ├── agent_tools.py       # 7 个 HDMAP 领域工具
+│       ├── agent_tools.py       # 7 个 HLR-Cache 领域工具
 │       └── middleware.py        # 中间件：工具日志、提示词动态切换
 ├── config/                      # YAML 配置文件
 │   ├── agent.yml                # Agent 行为与外部数据路径
@@ -45,13 +45,13 @@ Agent 通过 FastAPI SSE 流式端点对外服务，经 Node.js Socket.IO 桥接
 │   ├── prompts.yml              # 提示词路径映射
 │   └── rag.yml                  # 模型配置（chat_model / embedding_model）
 ├── data/                        # 知识库文档与外部数据
-│   ├── HDMAP-系统概述.txt
-│   ├── HDMAP-缓存策略.txt
-│   ├── HDMAP-RSU部署.txt
-│   ├── HDMAP-路由与车辆.txt
-│   ├── HDMAP-算法详解.txt
-│   ├── HDMAP-常见问题.txt
-│   ├── HDMAP-前端界面.txt
+│   ├── HLR-Cache-系统概述.txt
+│   ├── HLR-Cache-缓存策略.txt
+│   ├── HLR-Cache-RSU部署.txt
+│   ├── HLR-Cache-路由与车辆.txt
+│   ├── HLR-Cache-算法详解.txt
+│   ├── HLR-Cache-常见问题.txt
+│   ├── HLR-Cache-前端界面.txt
 │   └── external/
 │       └── hdmap_stats.csv
 ├── model/                       # 模型工厂
@@ -95,7 +95,7 @@ Vue 3 前端 (:5173)               Node.js 后端 (:3000)            Python Agen
 - Python 3.10+
 - Node.js 18+
 - 阿里云百炼 API Key（DashScope）
-- 已启动的 HDMAP Node.js 后端（可选，Agent 可独立运行）
+- 已启动的 HLR-Cache Node.js 后端（可选，Agent 可独立运行）
 
 ### 安装
 
@@ -108,7 +108,7 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 ```bash
 export DASHSCOPE_API_KEY="your-api-key"
-# 可选：连接到 HDMAP 后端获取实时数据
+# 可选：连接到 HLR-Cache 后端获取实时数据
 export AGENT_BACKEND_URL="http://localhost:3000"
 # 可选：自定义端口
 export AGENT_PORT=8000
@@ -139,7 +139,7 @@ curl -X POST http://localhost:8000/chat \
 
 ## 支持的任务类型
 
-- **知识库问答**：检索 HDMAP 文档回答系统架构、算法原理、配置参数等问题
+- **知识库问答**：检索 HLR-Cache 文档回答系统架构、算法原理、配置参数等问题
 - **实时数据查询**：通过工具获取 RSU 状态、路线信息、模拟运行状态
 - **缓存分析报告**：自动按流程生成包含命中率、缓存利用率、负载均衡的完整报告
 - **前端界面解答**：回答页面布局、按钮功能、图表含义等 UI 相关问题
@@ -150,7 +150,7 @@ curl -X POST http://localhost:8000/chat \
 
 | # | 工具名 | 功能 |
 |---|--------|------|
-| 1 | `rag_summarize` | 从 HDMAP 知识库检索相关资料 |
+| 1 | `rag_summarize` | 从 HLR-Cache 知识库检索相关资料 |
 | 2 | `get_rsu_status` | 获取指定 RSU 的缓存状态和命中率 |
 | 3 | `get_active_routes` | 获取当前活跃路线列表 |
 | 4 | `get_simulation_status` | 获取模拟运行状态 |
@@ -180,4 +180,4 @@ MD5 去重机制确保同一文件不会重复索引。
 
 ### ⭐ 鸣谢
 
-本项目基于 [LangChain-ReAct-Agent](https://github.com/lhh737/LangChain-ReAct-Agent) 改造，将原扫地机器人客服场景迁移为 HDMAP 边缘缓存系统智能助手。
+本项目基于 [LangChain-ReAct-Agent](https://github.com/lhh737/LangChain-ReAct-Agent) 改造，将原扫地机器人客服场景迁移为 HLR-Cache 边缘缓存系统智能助手。

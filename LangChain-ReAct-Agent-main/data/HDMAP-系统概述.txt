@@ -1,9 +1,9 @@
 ================================================================================
-HDMAP 分层高精地图边缘缓存可视化系统 — 系统概述
+HLR-Cache 面向自动驾驶的分层高精地图边缘缓存系统 — 系统概述
 ================================================================================
 
 ## 项目定位
-面向自动驾驶的分层高精地图边缘缓存可视化系统 (Layered HD-MAP Edge Caching Visualization System for Autonomous Driving)。系统模拟自动驾驶车辆在南京真实道路路线上行驶，每辆车经过一串路侧单元 (RSU)，RSU 负责缓存地图瓦片。Python MWC（最大权重闭包）算法周期性优化各 RSU 应缓存哪些瓦片以最大化预期命中率。Vue 3 前端通过 Socket.IO 实时可视化这一切。
+面向自动驾驶的分层高精地图边缘缓存系统 (HLR-Cache Edge Caching System for Autonomous Driving)。系统模拟自动驾驶车辆在南京真实道路路线上行驶，每辆车经过一串路侧单元 (RSU)，RSU 负责缓存地图瓦片。Python MWC（最大权重闭包）算法周期性优化各 RSU 应缓存哪些瓦片以最大化预期命中率。Vue 3 前端通过 Socket.IO 实时可视化这一切。
 
 ## 技术架构
 - 前端：Vue 3 + Vite + Element Plus 2.5 + ECharts 6 + Leaflet 1.9

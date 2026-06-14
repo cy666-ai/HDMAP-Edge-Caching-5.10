@@ -1,5 +1,5 @@
 """
-HDMAP Edge Caching System — ReAct Agent FastAPI Server
+HLR-Cache Edge Caching System — ReAct Agent FastAPI Server
 Replaces the original Streamlit UI (app.py). Provides SSE streaming chat endpoint
 for the Node.js backend to proxy to the Vue frontend.
 
@@ -38,7 +38,7 @@ import os
 
 from agent.react_agent import ReactAgent
 
-app = FastAPI(title="HDMAP ReAct Agent", version="1.0.0")
+app = FastAPI(title="HLR-Cache ReAct Agent", version="1.0.0")
 
 # CORS — allow Node.js backend and direct dev access
 app.add_middleware(
@@ -102,7 +102,7 @@ async def chat(req: ChatRequest):
 @app.get("/health")
 async def health():
     """Health check — called by Node.js chatService to verify agent is online."""
-    return {"status": "ok", "service": "HDMAP ReAct Agent"}
+    return {"status": "ok", "service": "HLR-Cache ReAct Agent"}
 
 
 if __name__ == "__main__":
@@ -111,5 +111,5 @@ if __name__ == "__main__":
     host = os.environ.get("AGENT_HOST", "0.0.0.0")
     port = int(os.environ.get("AGENT_PORT", "8000"))
 
-    print(f"[Agent Server] Starting HDMAP ReAct Agent on {host}:{port}")
+    print(f"[Agent Server] Starting HLR-Cache ReAct Agent on {host}:{port}")
     uvicorn.run(app, host=host, port=port)

@@ -1,5 +1,5 @@
 """
-HDMAP ReAct Agent — core class wrapping langgraph.prebuilt.create_react_agent.
+HLR-Cache ReAct Agent — core class wrapping langgraph.prebuilt.create_react_agent.
 
 Provides an execute_stream() method that yields text chunks as the agent
 reasons and calls tools. Compatible with the newer langgraph API.
@@ -27,9 +27,9 @@ from agent.tools.middleware import (
 
 class ReactAgent:
     """
-    ReAct-pattern agent for the HDMAP edge-caching system.
+    ReAct-pattern agent for the HLR-Cache edge-caching system.
 
-    Wraps langgraph's create_react_agent with 7 HDMAP-domain tools,
+    Wraps langgraph's create_react_agent with 7 HLR-Cache domain tools,
     tool-call logging middleware, and dynamic prompt switching for
     report-generation mode.
     """
@@ -59,7 +59,7 @@ class ReactAgent:
         )
         # Limit total ReAct iterations: tool_recur + text_gen + report proc ≈ up to 25
         self.recursion_limit = 10
-        logger.info(f"[ReactAgent] Agent initialized with 7 HDMAP tools (recursion_limit={self.recursion_limit})")
+        logger.info(f"[ReactAgent] Agent initialized with 7 HLR-Cache tools (recursion_limit={self.recursion_limit})")
 
     def execute_stream(self, query: str):
         """
@@ -158,8 +158,8 @@ if __name__ == '__main__':
     # Quick smoke test (requires DASHSCOPE_API_KEY env var)
     agent = ReactAgent()
 
-    print("=== HDMAP ReAct Agent — Smoke Test ===")
-    query = "介绍一下 HDMAP 系统的 MWC 算法"
+    print("=== HLR-Cache ReAct Agent — Smoke Test ===")
+    query = "介绍一下 HLR-Cache 系统的 MWC 算法"
     print(f"Query: {query}")
     print("---")
 
