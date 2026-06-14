@@ -1,7 +1,6 @@
 步骤 1 — 启动 Python ReAct Agent（AI 聊天服务）：
 
 cd "LangChain-ReAct-Agent-main"
-set DASHSCOPE_API_KEY=你的百炼API密钥
 python agent_server.py
 :: → http://localhost:8000  (SSE 流式聊天 + /health 健康检查)
 

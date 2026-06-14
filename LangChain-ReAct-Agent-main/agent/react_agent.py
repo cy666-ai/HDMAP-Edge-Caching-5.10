@@ -6,10 +6,11 @@ reasons and calls tools. Compatible with the newer langgraph API.
 """
 
 import asyncio
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage, SystemMessage
 
 from model.factory import chat_model
 from utils.prompt_loader import load_system_prompts, load_report_prompts
@@ -22,6 +23,7 @@ from agent.tools.agent_tools import (
 )
 from agent.tools.middleware import (
     wrap_tool_logging, make_state_modifier, get_report_context, set_report_context,
+    get_rag_called, set_rag_called,
 )
 
 
@@ -61,6 +63,57 @@ class ReactAgent:
         self.recursion_limit = 10
         logger.info(f"[ReactAgent] Agent initialized with 7 HLR-Cache tools (recursion_limit={self.recursion_limit})")
 
+    @staticmethod
+    def _deduplicate(text: str) -> str:
+        """
+        Detect and remove semantic duplicates from the model output.
+
+        qwen-plus has a tendency to give an answer and then rephrase it in different
+        words within the same generation. This function detects when the second half
+        of the text is too similar to the first half (by character-bigram Jaccard)
+        and truncates at the nearest sentence boundary before the midpoint.
+        """
+        if len(text) < 80:
+            return text  # Too short to contain a duplicate
+
+        mid = len(text) // 2
+        first_half = text[:mid]
+        second_half = text[mid:]
+
+        def char_bigrams(s: str):
+            return {s[i : i + 2] for i in range(len(s) - 1)}
+
+        b1 = char_bigrams(first_half)
+        b2 = char_bigrams(second_half)
+
+        if not b1 or not b2:
+            return text
+
+        jaccard = len(b1 & b2) / len(b1 | b2)
+
+        # Empirical threshold: >0.25 bigram overlap between halves means
+        # the model is saying the same thing twice with different words.
+        if jaccard > 0.25:
+            # Find the rightmost sentence boundary at or before the midpoint
+            # so we don't cut in the middle of a word
+            truncate_at = 0
+            for sep in ("。", "！", "？", "\n", "；"):
+                pos = text.rfind(sep, 0, mid)
+                if pos > truncate_at:
+                    truncate_at = pos + 1  # +1 to include the separator
+
+            if truncate_at == 0:
+                truncate_at = mid  # Fallback: no sentence boundary found
+
+            trimmed = text[:truncate_at].strip()
+            logger.info(
+                f"[ReactAgent] Semantic duplicate detected (Jaccard={jaccard:.3f}), "
+                f"trimming from {len(text)} to {len(trimmed)} chars"
+            )
+            return trimmed
+
+        return text
+
     def execute_stream(self, query: str):
         """
         Execute the agent and yield text chunks streamingly.
@@ -70,15 +123,22 @@ class ReactAgent:
         frontend can display character-by-character for a typewriter effect.
 
         Tool results and other non-LLM messages are yielded as complete chunks.
+
+        To combat qwen-plus's tendency to rephrase its own answer, all chunks
+        are buffered first, then deduplicated before yielding.
         """
-        # Reset report context for each query
+        # Reset context flags for each query
         set_report_context(False)
+        set_rag_called(False)
 
         input_dict = {
             "messages": [
                 {"role": "user", "content": query},
             ]
         }
+
+        # Buffer all chunks to enable post-generation deduplication
+        chunks = []
 
         try:
             for message_chunk, metadata in self.agent.stream(
@@ -95,6 +155,13 @@ class ReactAgent:
                 if isinstance(message_chunk, ToolMessage):
                     continue
 
+                # Skip the final assembled AIMessage (but NOT AIMessageChunk, which is
+                # a subclass) — its content has already been streamed token-by-token
+                # via AIMessageChunk above. Yielding it again would cause the entire
+                # response to appear twice (duplicate answer).
+                if isinstance(message_chunk, AIMessage) and not isinstance(message_chunk, AIMessageChunk):
+                    continue
+
                 # LLM token chunks (AIMessageChunk) — may contain text content
                 # or be a tool-call request with no text
                 if isinstance(message_chunk, AIMessageChunk):
@@ -102,22 +169,32 @@ class ReactAgent:
                     if content:
                         # content can be str (text token) or list (multi-modal)
                         if isinstance(content, str):
-                            yield content
+                            chunks.append(content)
                         elif isinstance(content, list):
                             for item in content:
                                 if isinstance(item, dict) and item.get("type") == "text":
-                                    yield item["text"]
+                                    chunks.append(item["text"])
                     # else: tool-call chunk with no text — nothing to yield
                     continue
 
-                # Any other message type with content
+                # Any other unexpected message type with content — log and skip
+                # to avoid accidentally yielding duplicate or internal content
                 if hasattr(message_chunk, "content") and message_chunk.content:
-                    content = message_chunk.content
-                    if isinstance(content, str):
-                        yield content
+                    logger.debug(
+                        f"[ReactAgent] Skipping unexpected message type "
+                        f"{type(message_chunk).__name__}: {str(message_chunk.content)[:100]}"
+                    )
         except Exception as e:
             logger.error(f"[ReactAgent] Stream error: {e}")
+            traceback.print_exc()
             yield f"\n[Agent Error] {str(e)}\n"
+            return
+
+        # Post-process: deduplicate then yield
+        full_text = "".join(chunks)
+        deduped = self._deduplicate(full_text)
+        if deduped:
+            yield deduped
 
     async def execute_stream_async(self, query: str):
         """

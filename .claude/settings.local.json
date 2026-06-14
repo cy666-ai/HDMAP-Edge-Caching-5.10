@@ -7,7 +7,9 @@
       "Bash(node -e ' *)",
       "Bash(npm run *)",
       "Bash(python3 -c ' *)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(powershell -Command \"Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,StartInfo\")",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Select-Object Id,ProcessName\")"
     ]
   },
   "hooks": {

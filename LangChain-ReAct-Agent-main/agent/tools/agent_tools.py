@@ -192,9 +192,10 @@ def _load_external_data():
             rsu_idx = arr[1].strip().replace('"', '')
             if route_id not in external_data:
                 external_data[route_id] = {}
+            n_cols = min(len(arr), len(header))
             external_data[route_id][rsu_idx] = {
                 header[i].strip().replace('"', ''): arr[i].strip().replace('"', '')
-                for i in range(2, len(arr))
+                for i in range(2, n_cols)
             }
 
 
